@@ -1,0 +1,472 @@
+{
+  "version": "2.0",
+  "generated_at": "2026-03-19T20:50:36.974632",
+  "skill_name": "demo-skill",
+  "skill_path": "/Users/zhanglei/.openclaw/skills/skill-certifier/test-data/demo-skill",
+  "total": 12,
+  "cases": [
+    {
+      "id": "hit_exact_0",
+      "dimension": "hit_rate",
+      "type": "exact_match",
+      "input": "test demo",
+      "expected": "activate",
+      "description": "精确触发: test demo",
+      "weight": 1.0,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: test demo",
+        "error": null,
+        "duration": 0.0056951045989990234,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981805"
+    },
+    {
+      "id": "hit_fuzzy_1",
+      "dimension": "hit_rate",
+      "type": "fuzzy_match",
+      "input": "请帮我test demo",
+      "expected": "activate",
+      "description": "模糊触发: 请帮我test demo",
+      "weight": 0.8,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: 请帮我test demo",
+        "error": null,
+        "duration": 0.005537986755371094,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981910"
+    },
+    {
+      "id": "hit_exact_2",
+      "dimension": "hit_rate",
+      "type": "exact_match",
+      "input": "run demo",
+      "expected": "activate",
+      "description": "精确触发: run demo",
+      "weight": 1.0,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: run demo",
+        "error": null,
+        "duration": 0.005593061447143555,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981989"
+    },
+    {
+      "id": "hit_fuzzy_3",
+      "dimension": "hit_rate",
+      "type": "fuzzy_match",
+      "input": "请帮我run demo",
+      "expected": "activate",
+      "description": "模糊触发: 请帮我run demo",
+      "weight": 0.8,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: 请帮我run demo",
+        "error": null,
+        "duration": 0.005513191223144531,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.982055"
+    },
+    {
+      "id": "hit_exact_4",
+      "dimension": "hit_rate",
+      "type": "exact_match",
+      "input": "demo",
+      "expected": "activate",
+      "description": "精确触发: demo",
+      "weight": 1.0,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: demo",
+        "error": null,
+        "duration": 1.9073486328125e-06,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981826"
+    },
+    {
+      "id": "hit_fuzzy_5",
+      "dimension": "hit_rate",
+      "type": "fuzzy_match",
+      "input": "请帮我demo",
+      "expected": "activate",
+      "description": "模糊触发: 请帮我demo",
+      "weight": 0.8,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: 请帮我demo",
+        "error": null,
+        "duration": 9.5367431640625e-07,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981836"
+    },
+    {
+      "id": "hit_negative_6",
+      "dimension": "hit_rate",
+      "type": "negative",
+      "input": "今天天气怎么样",
+      "expected": "not_activate",
+      "description": "负面测试: 无关输入不应触发",
+      "weight": 0.5,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: 今天天气怎么样",
+        "error": null,
+        "duration": 2.1457672119140625e-06,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981858"
+    },
+    {
+      "id": "success_normal_0",
+      "dimension": "success_rate",
+      "type": "normal",
+      "input": "test demo",
+      "expected": "success",
+      "description": "正常场景: 标准用法",
+      "weight": 1.0,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: test demo",
+        "error": null,
+        "duration": 9.5367431640625e-07,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981867"
+    },
+    {
+      "id": "success_with_args_1",
+      "dimension": "success_rate",
+      "type": "with_args",
+      "input": "test demo ./my-skill/",
+      "expected": "success",
+      "description": "带参数: 标准参数用法",
+      "weight": 0.9,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: test demo ./my-skill/",
+        "error": null,
+        "duration": 9.5367431640625e-07,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981875"
+    },
+    {
+      "id": "boundary_empty_0",
+      "dimension": "boundary",
+      "type": "empty_input",
+      "input": "",
+      "expected": "graceful_handling",
+      "description": "边界: 空输入处理",
+      "weight": 0.6,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: ",
+        "error": null,
+        "duration": 1.1920928955078125e-06,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981882"
+    },
+    {
+      "id": "boundary_long_1",
+      "dimension": "boundary",
+      "type": "long_input",
+      "input": "测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试",
+      "expected": "graceful_handling",
+      "description": "边界: 超长输入处理",
+      "weight": 0.6,
+      "status": "completed",
+      "result": {
+        "status": "error",
+        "output": "",
+        "error": "模拟失败",
+        "duration": 7.152557373046875e-07,
+        "matches_expected": false
+      },
+      "completed_at": "2026-03-19T20:50:36.981890"
+    },
+    {
+      "id": "exception_invalid_path_0",
+      "dimension": "exception",
+      "type": "invalid_path",
+      "input": "test demo /不存在的路径/",
+      "expected": "error_handled",
+      "description": "异常: 无效路径处理",
+      "weight": 0.7,
+      "status": "completed",
+      "result": {
+        "status": "passed",
+        "output": "成功处理: test demo /不存在的路径/",
+        "error": null,
+        "duration": 2.1457672119140625e-06,
+        "matches_expected": true
+      },
+      "completed_at": "2026-03-19T20:50:36.981898"
+    }
+  ],
+  "by_dimension": {
+    "hit_rate": [
+      {
+        "id": "hit_exact_0",
+        "dimension": "hit_rate",
+        "type": "exact_match",
+        "input": "test demo",
+        "expected": "activate",
+        "description": "精确触发: test demo",
+        "weight": 1.0,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: test demo",
+          "error": null,
+          "duration": 0.0056951045989990234,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981805"
+      },
+      {
+        "id": "hit_fuzzy_1",
+        "dimension": "hit_rate",
+        "type": "fuzzy_match",
+        "input": "请帮我test demo",
+        "expected": "activate",
+        "description": "模糊触发: 请帮我test demo",
+        "weight": 0.8,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: 请帮我test demo",
+          "error": null,
+          "duration": 0.005537986755371094,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981910"
+      },
+      {
+        "id": "hit_exact_2",
+        "dimension": "hit_rate",
+        "type": "exact_match",
+        "input": "run demo",
+        "expected": "activate",
+        "description": "精确触发: run demo",
+        "weight": 1.0,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: run demo",
+          "error": null,
+          "duration": 0.005593061447143555,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981989"
+      },
+      {
+        "id": "hit_fuzzy_3",
+        "dimension": "hit_rate",
+        "type": "fuzzy_match",
+        "input": "请帮我run demo",
+        "expected": "activate",
+        "description": "模糊触发: 请帮我run demo",
+        "weight": 0.8,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: 请帮我run demo",
+          "error": null,
+          "duration": 0.005513191223144531,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.982055"
+      },
+      {
+        "id": "hit_exact_4",
+        "dimension": "hit_rate",
+        "type": "exact_match",
+        "input": "demo",
+        "expected": "activate",
+        "description": "精确触发: demo",
+        "weight": 1.0,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: demo",
+          "error": null,
+          "duration": 1.9073486328125e-06,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981826"
+      },
+      {
+        "id": "hit_fuzzy_5",
+        "dimension": "hit_rate",
+        "type": "fuzzy_match",
+        "input": "请帮我demo",
+        "expected": "activate",
+        "description": "模糊触发: 请帮我demo",
+        "weight": 0.8,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: 请帮我demo",
+          "error": null,
+          "duration": 9.5367431640625e-07,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981836"
+      },
+      {
+        "id": "hit_negative_6",
+        "dimension": "hit_rate",
+        "type": "negative",
+        "input": "今天天气怎么样",
+        "expected": "not_activate",
+        "description": "负面测试: 无关输入不应触发",
+        "weight": 0.5,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: 今天天气怎么样",
+          "error": null,
+          "duration": 2.1457672119140625e-06,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981858"
+      }
+    ],
+    "success_rate": [
+      {
+        "id": "success_normal_0",
+        "dimension": "success_rate",
+        "type": "normal",
+        "input": "test demo",
+        "expected": "success",
+        "description": "正常场景: 标准用法",
+        "weight": 1.0,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: test demo",
+          "error": null,
+          "duration": 9.5367431640625e-07,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981867"
+      },
+      {
+        "id": "success_with_args_1",
+        "dimension": "success_rate",
+        "type": "with_args",
+        "input": "test demo ./my-skill/",
+        "expected": "success",
+        "description": "带参数: 标准参数用法",
+        "weight": 0.9,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: test demo ./my-skill/",
+          "error": null,
+          "duration": 9.5367431640625e-07,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981875"
+      }
+    ],
+    "boundary": [
+      {
+        "id": "boundary_empty_0",
+        "dimension": "boundary",
+        "type": "empty_input",
+        "input": "",
+        "expected": "graceful_handling",
+        "description": "边界: 空输入处理",
+        "weight": 0.6,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: ",
+          "error": null,
+          "duration": 1.1920928955078125e-06,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981882"
+      },
+      {
+        "id": "boundary_long_1",
+        "dimension": "boundary",
+        "type": "long_input",
+        "input": "测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试",
+        "expected": "graceful_handling",
+        "description": "边界: 超长输入处理",
+        "weight": 0.6,
+        "status": "completed",
+        "result": {
+          "status": "error",
+          "output": "",
+          "error": "模拟失败",
+          "duration": 7.152557373046875e-07,
+          "matches_expected": false
+        },
+        "completed_at": "2026-03-19T20:50:36.981890"
+      }
+    ],
+    "exception": [
+      {
+        "id": "exception_invalid_path_0",
+        "dimension": "exception",
+        "type": "invalid_path",
+        "input": "test demo /不存在的路径/",
+        "expected": "error_handled",
+        "description": "异常: 无效路径处理",
+        "weight": 0.7,
+        "status": "completed",
+        "result": {
+          "status": "passed",
+          "output": "成功处理: test demo /不存在的路径/",
+          "error": null,
+          "duration": 2.1457672119140625e-06,
+          "matches_expected": true
+        },
+        "completed_at": "2026-03-19T20:50:36.981898"
+      }
+    ]
+  },
+  "metadata": {
+    "triggers_found": 3,
+    "triggers": [
+      "test demo",
+      "run demo",
+      "demo"
+    ],
+    "skill_test_score": 97.0
+  },
+  "execution": {
+    "status": "completed",
+    "completed_at": "2026-03-19T20:50:36.982214",
+    "total": 12,
+    "completed": 12,
+    "passed": 11,
+    "failed": 0,
+    "errors": 1,
+    "success_rate": 91.66666666666666,
+    "duration_seconds": 0.0
+  },
+  "completed_at": "2026-03-19T20:50:36.982240"
+}

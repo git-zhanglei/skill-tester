@@ -1,0 +1,5 @@
+#!/bin/bash
+# Skill Certifier V2 入口脚本
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "${SCRIPT_DIR}/scripts/certifier_v2.py" "$@"
