@@ -128,7 +128,13 @@ python3 {baseDir}/scripts/test_cases_validator.py <cases_json>
 
 若 exit code 为 1，根据错误信息修正后重新保存并再次验证（常见问题：缺少 `total` / `weight` 字段，或 `total` 与实际 cases 数量不一致）。
 
-展示案例摘要，除非指定 `--yes` 否则等待确认。
+展示案例摘要（至少包含：`total`、按维度数量、前 5 条案例的 `id/type/input`）。
+
+**强制确认门控（必须执行）：**
+- 若命令包含 `--yes`：记录「用户已通过 --yes 跳过确认」，直接进入步骤 4。
+- 若未包含 `--yes`：**必须先向用户展示案例摘要并询问是否执行**，收到明确确认（如「确认执行 / 继续」）后才可进入步骤 4。
+- 若用户未确认、拒绝或超时：终止流程并返回「已取消执行，测试案例已保存到 `<cases_json>`」。
+- 在未确认前，**不得** 调用 `parallel_test_runner.py --prepare`、不得发起 `sessions_spawn`。
 
 ---
 
