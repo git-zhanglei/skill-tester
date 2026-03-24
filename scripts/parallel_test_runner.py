@@ -148,22 +148,22 @@ class TestCoordinator:
                     'recorded_at': now,
                 })
                 expected_trials = case.get('trial_count', 3)
-                if len(case['trials']) >= expected_trials:
-                    all_statuses = [t['status'] for t in case['trials']]
-                    agg_status = (
-                        TestStatus.PASSED
-                        if any(s == TestStatus.PASSED for s in all_statuses)
-                        else TestStatus.FAILED
-                    )
-                    case['status']       = TestStatus.COMPLETED
-                    case['completed_at'] = now
-                    case['result']       = {
-                        'status':  agg_status,
-                        'outcome': outcome,
-                        'session_id': session_id,
-                        'pass_at_k': sum(1 for s in all_statuses if s == TestStatus.PASSED),
-                        'k':         expected_trials,
-                    }
+                # 只要有 trial 记录就标记为完成（支持提前终止或单试验模式）
+                all_statuses = [t['status'] for t in case['trials']]
+                agg_status = (
+                    TestStatus.PASSED
+                    if any(s == TestStatus.PASSED for s in all_statuses)
+                    else TestStatus.FAILED
+                )
+                case['status']       = TestStatus.COMPLETED
+                case['completed_at'] = now
+                case['result']       = {
+                    'status':  agg_status,
+                    'outcome': outcome,
+                    'session_id': session_id,
+                    'pass_at_k': sum(1 for s in all_statuses if s == TestStatus.PASSED),
+                    'k':         len(case['trials']),
+                }
             else:
                 # ── Single-trial ──
                 case['status']       = TestStatus.COMPLETED
