@@ -47,6 +47,19 @@ STDLIB_MODULES = {
 }
 
 
+# 风险/复杂度信号（用于按需建议 Guardrails / Workflow）
+GUARDRAILS_RISK_PATTERNS = [
+    (r'\b(delete|remove|drop|truncate|exec|shell|sudo|chmod|chown|deploy|rollback)\b', '涉及系统级或高风险操作'),
+    (r'写入|修改|删除|覆盖|批量|权限|生产|数据库|凭证|密钥|token|api[_ -]?key|管理员|越权|支付|转账|账单', '涉及敏感数据或权限边界'),
+    (r'os\.|subprocess|rm\s+-rf|curl\s+.*\|\s*sh', '包含可执行脚本或危险命令信号'),
+]
+
+WORKFLOW_HINT_PATTERNS = [
+    (r'步骤|流程|阶段|phase|pipeline|先.*再|然后|最后|step', '文档包含流程/阶段性描述'),
+    (r'并行|重试|回滚|幂等|fallback|降级|超时|timeout', '执行逻辑包含分支或运行时策略'),
+]
+
+
 # ─────────────────────────────────────────────
 # 工具函数
 # ─────────────────────────────────────────────
@@ -71,6 +84,49 @@ def _read_skill_md(skill_path: str) -> Tuple[str, Dict[str, str], str]:
 
 def _result(id_: str, category: str, status: str, message: str) -> Dict:
     return {'id': id_, 'category': category, 'status': status, 'message': message}
+
+
+def _unique_reasons(reasons: List[str], limit: int = 2) -> List[str]:
+    uniq: List[str] = []
+    for reason in reasons:
+        if reason not in uniq:
+            uniq.append(reason)
+        if len(uniq) >= limit:
+            break
+    return uniq
+
+
+def _should_require_guardrails(frontmatter: Dict[str, str], body: str) -> Tuple[bool, List[str]]:
+    text = f'{frontmatter.get("description", "")}\n{body}'.lower()
+    reasons: List[str] = []
+    for pattern, reason in GUARDRAILS_RISK_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            reasons.append(reason)
+    return bool(reasons), _unique_reasons(reasons)
+
+
+def _should_require_workflow(frontmatter: Dict[str, str], body: str) -> Tuple[bool, List[str]]:
+    text = f'{frontmatter.get("description", "")}\n{body}'
+    lines = len(body.splitlines())
+    headings = len(re.findall(r'^#+\s+', body, re.MULTILINE))
+    code_blocks = len(re.findall(r'```', body)) // 2
+
+    reasons: List[str] = []
+    if lines >= 120:
+        reasons.append('正文较长（>=120 行）')
+    if headings >= 6:
+        reasons.append('章节较多（>=6 个标题）')
+    if code_blocks >= 2:
+        reasons.append('包含多个代码块（>=2）')
+    for pattern, reason in WORKFLOW_HINT_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            reasons.append(reason)
+
+    needs_guardrails, _ = _should_require_guardrails(frontmatter, body)
+    if needs_guardrails:
+        reasons.append('存在风险操作，建议明确执行顺序与边界')
+
+    return bool(reasons), _unique_reasons(reasons)
 
 
 # ─────────────────────────────────────────────
@@ -123,12 +179,17 @@ def check_no_extraneous_files(skill_path: str) -> Dict:
 
 
 def check_has_guardrails(skill_path: str) -> Dict:
-    _, _, body = _read_skill_md(skill_path)
+    _, fm, body = _read_skill_md(skill_path)
     has = bool(re.search(r'^#+\s*Guardrails', body, re.MULTILINE | re.IGNORECASE))
-    if not has:
+    if has:
+        return _result('has_guardrails', 'structure', PASS, '有 Guardrails 章节')
+
+    needed, reasons = _should_require_guardrails(fm, body)
+    if needed:
         return _result('has_guardrails', 'structure', WARN,
-                       '缺少 ## Guardrails 章节（OpenClaw 规范推荐的必备章节）')
-    return _result('has_guardrails', 'structure', PASS, '有 Guardrails 章节')
+                       f'检测到该 Skill 需要 Guardrails，但缺少相关章节（依据：{"；".join(reasons)}）')
+    return _result('has_guardrails', 'structure', PASS,
+                   '未检测到高风险或权限边界场景，Guardrails 章节可按需提供')
 
 
 # ─────────────────────────────────────────────
@@ -199,12 +260,17 @@ def check_token_cost(skill_path: str) -> Dict:
 
 
 def check_has_workflow(skill_path: str) -> Dict:
-    _, _, body = _read_skill_md(skill_path)
+    _, fm, body = _read_skill_md(skill_path)
     patterns = [r'##\s*Workflow', r'##\s*执行步骤', r'##\s*Steps', r'##\s*工作流']
     if any(re.search(p, body, re.IGNORECASE) for p in patterns):
         return _result('has_workflow', 'documentation', PASS, '有 Workflow / 执行步骤 章节')
-    return _result('has_workflow', 'documentation', WARN,
-                   '缺少 ## Workflow / ## 执行步骤 章节，Agent 难以理解操作顺序')
+
+    needed, reasons = _should_require_workflow(fm, body)
+    if needed:
+        return _result('has_workflow', 'documentation', WARN,
+                       f'该 Skill 更适合提供 Workflow / 执行步骤（依据：{"；".join(reasons)}）')
+    return _result('has_workflow', 'documentation', PASS,
+                   '当前复杂度较低，Workflow 章节可按需提供')
 
 
 def check_references_linked(skill_path: str) -> Dict:

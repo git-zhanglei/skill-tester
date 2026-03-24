@@ -42,13 +42,12 @@ def generate_test_cases(skill_path: str) -> List[TestCase]:
         
         1. 触发命中率（hit_rate）：
            - 精确触发词（exact_match）：直接使用 SKILL.md 中声明的触发词
-           - 模糊变体（fuzzy_match）：语义相近但表述不同的输入，至少 3 个
-           - 负面测试（negative_test）：完全无关的输入，不应触发 Skill，至少 2 个
+           - 模糊变体（fuzzy_match）：触发词同义词/衍生词（如口语化、礼貌前后缀），至少 3 个
+           - 负面测试（negative_test）：非同义、无关输入，不应触发 Skill，至少 2 个
         
         2. Agent理解度（agent_comprehension）：
-           - 步骤遵循（step_following）：验证 Agent 是否执行了所有声明的阶段
-           - 工具调用（tool_selection）：验证 Agent 是否调用了正确的工具
-           - 输出格式（output_format）：验证 Agent 输出是否符合 Skill 规范
+           - 结果检验（outcome_check）：验证最终产物是否满足 Skill 声明目标
+           - 格式检验（format_check）：验证输出结构/字段是否符合 Skill 规范
         
         3. 执行成功率（execution_success）：
            - 正常路径（normal_path）：标准输入

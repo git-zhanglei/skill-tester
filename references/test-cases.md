@@ -13,8 +13,8 @@ skill-tester 的测试案例覆盖 4 个维度。案例由 Agent 泛化生成，
 | 测试类型 | 说明 | 预期结果 | 占比 |
 |---------|------|--------|------|
 | `exact_match` | 使用 SKILL.md 中声明的精确触发词 | `activate` | 40% |
-| `fuzzy_match` | 语义相近的不同表述 | `activate` | 40% |
-| `negative_test` | 完全无关的输入 | `not_activate` | 20% |
+| `fuzzy_match` | 触发词的同义词/衍生表达（口语化、礼貌前后缀） | `activate` | 40% |
+| `negative_test` | 非同义、完全无关的输入（用于验证不误触发） | `not_activate` | 20% |
 
 **示例：**
 ```json
@@ -60,9 +60,9 @@ skill-tester 的测试案例覆盖 4 个维度。案例由 Agent 泛化生成，
 
 | 类别 | 检查项（示例） |
 |------|------------|
-| structure | SKILL.md 存在、frontmatter 完整、name 与目录名一致、无冗余文件、有 Guardrails |
+| structure | SKILL.md 存在、frontmatter 完整、name 与目录名一致、无冗余文件、Guardrails 按需建议 |
 | trigger | description 长度≥20字符、description 含触发上下文短语 |
-| documentation | Token 开销（>400行=FAIL）、有 Workflow 章节、references 均已链接 |
+| documentation | Token 开销（>400行=FAIL）、Workflow 按需建议、references 均已链接 |
 | scripts | Python 语法正确、仅使用标准库或本地模块 |
 | security | 环境变量均已文档化 |
 | agent_specific | 具备机器可读输出信号（--json / exit code） |
@@ -74,7 +74,7 @@ skill-tester 的测试案例覆盖 4 个维度。案例由 Agent 泛化生成，
 python3 scripts/spec_checker.py <skill_path> --json
 ```
 
-**注意：** 规范程度得分直接来自 `summary.spec_score`，不生成动态测试案例。
+**注意：** 规范程度得分直接来自 `summary.spec_score`，不生成动态测试案例；Guardrails/Workflow 仅在判定「该 Skill 需要」时，缺失才给出建议。
 
 ---
 

@@ -120,6 +120,38 @@ class TestSmartTestGenerator(unittest.TestCase):
         cases = SmartTestGenerator(self.skill).generate()
         self.assertIsInstance(cases, list)
 
+    def test_generate_includes_categorized_dimensions(self):
+        self._write(
+            '---\n'
+            'name: skill-tester\n'
+            'description: "当用户说「测试skill」「评估skill」时触发。"\n'
+            '---\n'
+            '# T\n'
+        )
+        from smart_test_generator import SmartTestGenerator
+        cases = SmartTestGenerator(self.skill).generate()
+        dims = {c.get('dimension') for c in cases}
+        self.assertIn('hit_rate', dims)
+        self.assertIn('agent_comprehension', dims)
+        self.assertIn('execution_success', dims)
+
+    def test_hit_rate_uses_synonyms_and_negative_intents(self):
+        self._write(
+            '---\n'
+            'name: skill-tester\n'
+            'description: "当用户说「测试skill」时触发。"\n'
+            '---\n'
+            '# T\n'
+        )
+        from smart_test_generator import SmartTestGenerator
+        cases = SmartTestGenerator(self.skill).generate()
+        fuzzy = [c for c in cases if c.get('dimension') == 'hit_rate' and c.get('type') == 'fuzzy_match']
+        negative = [c for c in cases if c.get('dimension') == 'hit_rate' and c.get('type') == 'negative_test']
+        self.assertGreater(len(fuzzy), 0, '应生成同义词/衍生词的模糊命中案例')
+        self.assertGreater(len(negative), 0, '应生成非同义负样本案例')
+        self.assertTrue(all(c.get('expected') == 'activate' for c in fuzzy))
+        self.assertTrue(all(c.get('expected') == 'not_activate' for c in negative))
+
     def test_generate_includes_adversarial(self):
         self._write('---\nname: file-manager\ndescription: "管理文件和路径"\n---\n# File Manager\n使用 path 和 file 进行操作。\n')
         from smart_test_generator import SmartTestGenerator
@@ -133,6 +165,7 @@ class TestSmartTestGenerator(unittest.TestCase):
         cases = SmartTestGenerator(self.skill).generate()
         for c in cases:
             if c.get('type') == 'adversarial':
+                self.assertIn('id', c)
                 self.assertIn('dimension', c)
                 self.assertIn('expected', c)
                 self.assertIn('description', c)
@@ -402,6 +435,15 @@ class TestSpecChecker(unittest.TestCase):
         self._write_skill_md('---\nname: x\ndescription: "test"\n---\n# T\n')
         from spec_checker import check_has_guardrails
         r = check_has_guardrails(str(self.skill))
+        self.assertEqual(r['status'], 'pass')
+
+    def test_no_guardrails_warns_when_risky(self):
+        self._write_skill_md(
+            '---\nname: x\ndescription: "执行数据库删除操作"\n---\n# T\n'
+            '该技能会删除生产数据库中的记录。\n'
+        )
+        from spec_checker import check_has_guardrails
+        r = check_has_guardrails(str(self.skill))
         self.assertEqual(r['status'], 'warn')
 
     # trigger 类别
@@ -451,6 +493,22 @@ class TestSpecChecker(unittest.TestCase):
         from spec_checker import check_has_workflow
         r = check_has_workflow(str(self.skill))
         self.assertEqual(r['status'], 'pass')
+
+    def test_no_workflow_passes_when_simple(self):
+        self._write_skill_md('---\nname: x\ndescription: "简单问答 skill"\n---\n# T\n只返回固定文案。\n')
+        from spec_checker import check_has_workflow
+        r = check_has_workflow(str(self.skill))
+        self.assertEqual(r['status'], 'pass')
+
+    def test_no_workflow_warns_when_complex(self):
+        body = '\n'.join([f'- line {i}' for i in range(140)])
+        self._write_skill_md(
+            '---\nname: x\ndescription: "该技能分三个阶段执行，先解析再执行最后汇总"\n---\n'
+            f'# T\n{body}\n'
+        )
+        from spec_checker import check_has_workflow
+        r = check_has_workflow(str(self.skill))
+        self.assertEqual(r['status'], 'warn')
 
     # scripts 类别
 

@@ -63,7 +63,8 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 从输出 JSON 中取 `summary.spec_score` 作为 **Skill规范程度** 维度得分（0–100）。
 
 > 检查项涵盖：frontmatter 完整性、触发词质量（词数/上下文短语）、Token 开销（严格：>400行=失败）、
-> Guardrails、Workflow 章节、references 链接、Python 语法、无外部依赖、环境变量文档化、可组合性信号。
+> references 链接、Python 语法、无外部依赖、环境变量文档化、可组合性信号。
+> Guardrails / Workflow 采用**按需判定**：当 Skill 存在高风险边界或明显多阶段流程时，缺失才给出建议；不默认扣分。
 
 ---
 
@@ -75,8 +76,8 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 **A — 触发命中率（hit_rate）**
 - `exact_match`：精确触发词，预期 `"activate"`（multi_trial: true）
-- `fuzzy_match`：语义变体（3条），预期 `"activate"`
-- `negative_test`：无关输入（2条），预期 `"not_activate"`
+- `fuzzy_match`：触发词同义词/衍生词变体（如口语化、礼貌前后缀），预期 `"activate"`
+- `negative_test`：非同义、无关指令（2条），预期 `"not_activate"`；若未命中说明 Skill 边界清晰，应计为正向表现
 
 **B — Agent 理解度（agent_comprehension）**  
 聚焦**结果（outcome）**，不监测步骤：
@@ -94,7 +95,7 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 > `idempotency_check` 补充：对实时数据类 Skill（天气/股价等），改为验证**输出格式**一致而非数据值一致。
 
-将以下结构保存为 `~/.skill-tester/test-cases/test-cases-<skill_name>-<timestamp>.json`（后称 `<cases_json>`）。  
+将测试案例按维度分组设计后，再保存为 `~/.skill-tester/test-cases/test-cases-<skill_name>-<timestamp>.json`（后称 `<cases_json>`）。  
 **注意**：`safety` 和 `spec_score` 在此处一并写入，`--finalize` 后该文件即可直接用于生成报告，无需额外组装。
 
 ```json
