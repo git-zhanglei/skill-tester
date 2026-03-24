@@ -31,7 +31,7 @@ source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-
 - `--timeout <n>`：每案例超时秒（默认 60）
 - `--trials <n>`：critical 案例重复次数（默认 3，用于 pass@k）
 - `--output-json`：同时生成 JSON 报告
-- `--dry-run`：仅执行步骤 1-2，不启动 sessions_spawn（适合 CI 快速检查）
+- `--dry-run`：仅执行步骤 1-2（含 1.5），不启动 sessions_spawn（适合 CI 快速检查）
 - `--validate`：先对本 Skill 自身运行，验证评分基线后再测目标
 - `--eval-md`：将评估摘要写入 `<skill_path>/EVAL.md`（随 Skill 版本管理）
 - `--skip-safety`：跳过步骤 1（仅调试用）
@@ -46,11 +46,27 @@ python3 {baseDir}/scripts/safety_checker.py <skill_path>
 
 | status | 处理方式 |
 |--------|--------|
-| `"passed"` | 继续步骤 2 |
+| `"passed"` | 继续步骤 1.5 |
 | `"warning"` | 展示 `warnings`，询问是否继续 |
 | `"failed"` | 展示 `issues`，**终止，综合评分为 0** |
 
 若指定 `--dry-run`，步骤 2 完成后直接跳到步骤 5 报告。
+
+---
+
+### 步骤 1.5：沙箱可测试性检查（新增）
+
+```bash
+python3 {baseDir}/scripts/sandbox_checker.py <skill_path>
+```
+
+根据输出判断是否可在沙箱中测试，并记录 `sandbox_check` 结果用于后续风险告知：
+
+| status | 含义 | 处理方式 |
+|--------|------|----------|
+| `"sandbox_compatible"` | 可在沙箱测试 | 正常继续步骤 2 |
+| `"sandbox_incompatible"` | 依赖沙箱外能力（如环境变量/网络访问/浏览器） | 继续步骤 2，但**必须在步骤 3 用户确认时明确风险告知** |
+| `"error"` | 无法判断（如缺少 SKILL.md） | 终止并提示修复输入 |
 
 ---
 
@@ -70,7 +86,8 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ### 步骤 3：生成测试案例
 
-**质量优先**：每维度生成 2-3 个精准案例，总数不超过 **15 个**。精心设计的少量案例优于大量噪声案例。
+**质量优先**：每维度生成 2-3 个精准案例，总数不超过 **30 个**。  
+> 说明：30 为**上限**，实际生成数量可根据目标 Skill 复杂度和可测信号少于 30。
 
 阅读 `<skill_path>/SKILL.md`，生成以下四维度测试案例：
 
@@ -105,6 +122,7 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
   "skill_path": "<skill_path>",
   "safety":     <步骤 1 的完整输出 JSON>,
   "spec_score": <步骤 2 的 summary.spec_score 数值>,
+  "sandbox_check": <步骤 1.5 的完整输出 JSON>,
   "total":      <cases 数组的长度>,
   "cases": [
     {
@@ -129,11 +147,13 @@ python3 {baseDir}/scripts/test_cases_validator.py <cases_json>
 
 若 exit code 为 1，根据错误信息修正后重新保存并再次验证（常见问题：缺少 `total` / `weight` 字段，或 `total` 与实际 cases 数量不一致）。
 
-展示案例摘要（至少包含：`total`、按维度数量、前 5 条案例的 `id/type/input`）。
+展示**全部测试案例**（至少包含：`total`、按维度数量、每条案例的 `id/type/input/expected`）。
 
 **强制确认门控（必须执行）：**
 - 若命令包含 `--yes`：记录「用户已通过 --yes 跳过确认」，直接进入步骤 4。
-- 若未包含 `--yes`：**必须先向用户展示案例摘要并询问是否执行**，收到明确确认（如「确认执行 / 继续」）后才可进入步骤 4。
+- 若未包含 `--yes`：**必须先向用户展示全部测试案例并询问是否执行**，收到明确确认（如「确认执行 / 继续」）后才可进入步骤 4。
+- 若 `sandbox_check.status == "sandbox_incompatible"`：确认前必须明确告知：  
+  `待测试 Skill 因依赖 <capability 列表> 无法在沙箱中测试，继续执行将不具备沙箱隔离保护，存在影响本地环境风险。`
 - 若用户未确认、拒绝或超时：终止流程并返回「已取消执行，测试案例已保存到 `<cases_json>`」。
 - 在未确认前，**不得** 调用 `parallel_test_runner.py --prepare`、不得发起 `sessions_spawn`。
 

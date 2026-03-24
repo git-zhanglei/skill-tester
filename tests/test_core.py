@@ -9,6 +9,7 @@ import json
 import unittest
 import tempfile
 import shutil
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
@@ -67,6 +68,47 @@ class TestSafetyChecker(unittest.TestCase):
 
 
 # ──────────────────────────────────────────────
+# SandboxChecker
+# ──────────────────────────────────────────────
+
+class TestSandboxChecker(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _write_skill(self, content: str):
+        (self.skill / 'SKILL.md').write_text(content, encoding='utf-8')
+
+    def test_simple_skill_is_sandbox_compatible(self):
+        self._write_skill('---\nname: s\ndescription: "本地纯文本处理"\n---\n# S\n')
+        from sandbox_checker import SandboxChecker
+        result = SandboxChecker(self.skill).check()
+        self.assertEqual(result['status'], 'sandbox_compatible')
+        self.assertTrue(result['sandbox_testable'])
+
+    def test_env_dependency_marks_incompatible(self):
+        self._write_skill('---\nname: s\ndescription: "使用 OPENAI_API_KEY 调用接口"\n---\n# S\n')
+        from sandbox_checker import SandboxChecker
+        result = SandboxChecker(self.skill).check()
+        self.assertEqual(result['status'], 'sandbox_incompatible')
+        caps = {d.get('capability') for d in result.get('dependencies', [])}
+        self.assertIn('environment_variables', caps)
+
+    def test_network_dependency_marks_incompatible(self):
+        self._write_skill('---\nname: s\ndescription: "调用 https://api.example.com 获取数据"\n---\n# S\n')
+        from sandbox_checker import SandboxChecker
+        result = SandboxChecker(self.skill).check()
+        self.assertEqual(result['status'], 'sandbox_incompatible')
+        caps = {d.get('capability') for d in result.get('dependencies', [])}
+        self.assertIn('network_access', caps)
+
+
+# ──────────────────────────────────────────────
 # SmartTestGenerator — 使用实际 API
 # ──────────────────────────────────────────────
 
@@ -119,6 +161,40 @@ class TestSmartTestGenerator(unittest.TestCase):
         from smart_test_generator import SmartTestGenerator
         cases = SmartTestGenerator(self.skill).generate()
         self.assertIsInstance(cases, list)
+
+    def test_default_max_cases_is_30(self):
+        self._write('---\nname: x\ndescription: "d"\n---\n# T\n')
+        from smart_test_generator import SmartTestGenerator
+        g = SmartTestGenerator(self.skill)
+        self.assertEqual(g.max_cases, 30)
+
+    def test_generate_respects_max_cases_limit(self):
+        self._write('---\nname: x\ndescription: "当用户说「测试skill」时触发。"\n---\n# T\n')
+        from smart_test_generator import SmartTestGenerator
+        generator = SmartTestGenerator(self.skill, max_cases=3)
+
+        fake_hit = [
+            {'id': f'h{i}', 'dimension': 'hit_rate', 'type': 'exact_match', 'input': 'x',
+             'expected': 'activate', 'description': 'd', 'priority': '中', 'weight': 1.0, 'status': 'pending'}
+            for i in range(5)
+        ]
+        fake_comp = [
+            {'id': f'c{i}', 'dimension': 'agent_comprehension', 'type': 'outcome_check', 'input': 'x',
+             'expected': 'ok', 'description': 'd', 'priority': '中', 'weight': 1.0, 'status': 'pending'}
+            for i in range(2)
+        ]
+        fake_exec = [
+            {'id': f'e{i}', 'dimension': 'execution_success', 'type': 'normal_path', 'input': 'x',
+             'expected': 'ok', 'description': 'd', 'priority': '中', 'weight': 1.0, 'status': 'pending'}
+            for i in range(4)
+        ]
+
+        with patch.object(generator, '_generate_hit_rate_cases', return_value=fake_hit), \
+             patch.object(generator, '_generate_comprehension_cases', return_value=fake_comp), \
+             patch.object(generator, '_generate_execution_cases', return_value=fake_exec):
+            cases = generator.generate()
+
+        self.assertEqual(len(cases), 3, '生成结果必须受 max_cases 限制')
 
     def test_generate_includes_categorized_dimensions(self):
         self._write(

@@ -19,7 +19,7 @@ Report Builder — 基于统一 results JSON 生成认证报告
       "status": "completed",
       "result": { "status": "passed/failed/error", "outcome": "...", "failure_reason": null } }
   ],
-  "execution": { "total": 20, "passed": 18, "failed": 2, "duration_seconds": 45.3 }
+  "execution": { "total": 30, "passed": 27, "failed": 3, "duration_seconds": 45.3 }
 }
 """
 

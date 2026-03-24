@@ -68,7 +68,7 @@ DIMENSION_WEIGHTS = {
 # 默认执行配置
 DEFAULT_PARALLEL  = 4
 DEFAULT_TIMEOUT   = 60
-DEFAULT_MAX_CASES = 15   # 与 SKILL.md "质量优先，总数≤15" 一致
+DEFAULT_MAX_CASES = 30   # 与 SKILL.md "质量优先，总数≤30" 一致
 
 # 评分阈值
 SCORE_EXCELLENT = 90

@@ -3,6 +3,9 @@
 ## 概述
 
 skill-tester 的测试案例覆盖 4 个维度。案例由 Agent 泛化生成，保存为 JSON 文件，支持复用与断点续测。
+最大案例数默认 30（上限），实际生成数可小于 30。
+
+在进入执行前，主流程应向用户展示**全部测试案例**（而不是部分样例），并在用户确认后开始执行。
 
 ## 4 个测试维度
 
@@ -167,7 +170,7 @@ python3 scripts/spec_checker.py <skill_path> --json
   "skill_name": "my-skill",
   "skill_path": "~/skills/my-skill/",
   "generated_at": "2026-03-23T10:00:00",
-  "total": 20,
+  "total": 30,
   "cases": [
     {
       "id": "hit_exact_0",
@@ -189,7 +192,7 @@ python3 scripts/spec_checker.py <skill_path> --json
     "multi_model": false,
     "models_used": [],
     "progress": {
-      "total": 20,
+      "total": 30,
       "completed": 0,
       "passed": 0,
       "failed": 0,

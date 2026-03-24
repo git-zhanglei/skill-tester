@@ -128,10 +128,10 @@ def execute_test_case(test_case: dict, skill_path: str, model: str = "auto") -> 
 
 均匀分配测试案例到各模型：
 ```
-案例 1-5   → model-a
-案例 6-10  → model-b
-案例 11-15 → model-c
-案例 16-20 → model-a（循环）
+案例 1-10   → model-a
+案例 11-20  → model-b
+案例 21-30  → model-c
+案例 31+    → model-a（循环）
 ```
 
 #### round-robin
@@ -206,7 +206,7 @@ def update_progress(test_cases_file: str, case_id: str, result: dict):
     "activated": true,
     "steps_observed": ["安全检查", "测试案例生成", "执行", "报告"],
     "tools_called": ["sessions_spawn", "write_file"],
-    "output_summary": "生成了包含 20 个测试案例的认证报告",
+    "output_summary": "生成了包含 30 个测试案例的认证报告",
     "actual_vs_expected": "符合预期",
     "failure_reason": null
   },

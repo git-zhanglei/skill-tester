@@ -6,7 +6,7 @@
 # 执行设置
 parallel_degree: 4              # 并行 Agent 数量
 timeout_per_test: 60            # 每个测试案例超时（秒）
-max_test_cases: 15              # 最大测试案例总数
+max_test_cases: 30              # 最大测试案例总数（上限）
 auto_save_interval: 5           # 每完成 N 个自动保存一次
 
 # 安全检查
@@ -51,7 +51,7 @@ thresholds:
 # 执行
 SKILL_TESTER_PARALLEL=4
 SKILL_TESTER_TIMEOUT=60
-SKILL_TESTER_MAX_CASES=15
+SKILL_TESTER_MAX_CASES=30
 
 # 多模型
 SKILL_TESTER_MULTI_MODEL=false

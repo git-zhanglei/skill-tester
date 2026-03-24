@@ -29,6 +29,7 @@ def verify():
         "CI/CD 指南":               skill_dir / "references" / "ci-cd.md",
         # scripts/
         "安全检查器":                skill_dir / "scripts" / "safety_checker.py",
+        "沙箱检查器":                skill_dir / "scripts" / "sandbox_checker.py",
         "规范检查器":                skill_dir / "scripts" / "spec_checker.py",
         "测试案例生成器":             skill_dir / "scripts" / "smart_test_generator.py",
         "执行协调器":                skill_dir / "scripts" / "parallel_test_runner.py",

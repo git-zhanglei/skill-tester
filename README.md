@@ -7,13 +7,14 @@
 
 ## 概述
 
-skill-tester 将 Skill 评估从主观的「好/坏」转变为客观、可量化的指标。通过 4 个阶段对目标 Skill 进行全面测试，输出包含安全状态、触发命中率、Skill规范程度、Agent理解度、执行成功率等维度的专业报告。
+skill-tester 将 Skill 评估从主观的「好/坏」转变为客观、可量化的指标。通过安全门控、沙箱可测性预检与后续测试流程，对目标 Skill 进行全面测试，输出包含安全状态、触发命中率、Skill规范程度、Agent理解度、执行成功率等维度的专业报告。
 
 ## 特性
 
 ### 🔒 安全门控
 - 前置安全检查，发现严重问题立即终止
 - 检查危险代码、凭证泄露、个人数据暴露
+- 沙箱可测性预检：识别环境变量/网络等依赖并进行风险告知
 
 ### 📊 4 维度量化评分
 
@@ -83,10 +84,14 @@ python3 verify.py
 │  ├─ 危险代码模式 / 凭证泄露 / 个人数据检测                  │
 │  └─ 通过→继续 / 警告→提示继续 / 失败→终止                  │
 │                                                             │
+│  阶段 1.5: 沙箱可测性检查                                   │
+│  ├─ 检测环境变量/网络/浏览器等依赖                          │
+│  └─ 若不可沙箱测试，后续确认前必须风险告知                  │
+│                                                             │
 │  阶段 2: 测试案例生成                                       │
 │  ├─ Agent 解析 SKILL.md，泛化多场景测试案例                 │
 │  ├─ 覆盖触发命中率/规范/理解度/执行成功率 4 维度            │
-│  └─ 保存 JSON 测试案例集，用户确认                          │
+│  └─ 保存 JSON 测试案例集，展示全部案例并用户确认            │
 │                                                             │
 │  阶段 3: 多 Agent 并行执行                                  │
 │  ├─ sessions_spawn 创建隔离会话                             │
@@ -142,6 +147,7 @@ skill-tester/
 ├── install.py                  # 安装脚本
 ├── scripts/
 │   ├── safety_checker.py       # 安全检查
+│   ├── sandbox_checker.py      # 沙箱可测试性检查
 │   ├── spec_checker.py         # 规范结构检查（14 项）
 │   ├── smart_test_generator.py # Agent 泛化测试案例生成
 │   ├── parallel_test_runner.py # 测试协调器（prepare/record/finalize）
@@ -159,7 +165,7 @@ skill-tester/
 │   ├── ci-cd.md                # CI/CD 集成指南
 │   └── troubleshooting.md      # 故障排除
 └── tests/
-    ├── test_core.py            # 核心单元测试（70 个）
+    ├── test_core.py            # 核心单元测试（80 个）
     └── test_integration.py     # 集成测试
 ```
 

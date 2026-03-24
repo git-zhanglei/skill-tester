@@ -30,7 +30,7 @@ class SmartTestGenerator:
         '解释一下二分查找',
     ]
 
-    def __init__(self, skill_path: Path, max_cases: int = 15):
+    def __init__(self, skill_path: Path, max_cases: int = 30):
         self.skill_path = skill_path
         self.max_cases = max_cases
         self.skill_md = skill_path / 'SKILL.md'
