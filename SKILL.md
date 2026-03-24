@@ -167,7 +167,13 @@ result = sessions_spawn(
 )
 # 提取子 session 的实际输出
 sub_output = result.get("output") or result.get("response") or str(result)
+sub_session_id = result.get("session_id") or result.get("id") or result.get("sessionId")
 ```
+
+**执行真实性门控（必须执行）：**
+- 每个 case 必须先调用一次 `sessions_spawn`，拿到 `sub_output` 与 `sub_session_id` 后，才可记录结果。
+- 若 `sessions_spawn` 不可用、超时或未返回 `sub_session_id`：该 case 只能记为 `error`，并在 `outcome` 写明原因，**不得** 伪造 `passed/failed`。
+- 禁止“批量补写”结果：必须 `执行 1 条 -> 记录 1 条`，循环直至全部 case 完成或中止。
 
 **4.3 评估结果并记录**
 
@@ -176,8 +182,10 @@ sub_output = result.get("output") or result.get("response") or str(result)
 ```bash
 python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> \
     --record <case_id> --status passed|failed|error \
-    --outcome "实际输出摘要" [--trial 1]
+    --outcome "实际输出摘要" --session-id "<sub_session_id>" [--trial 1]
 ```
+
+> `--outcome` 与 `--session-id` 为必填，缺失时 `--record` 会失败（防止“空结果/虚假记录”）。
 
 **评分器类型**：
 - `"deterministic"`：检查具体特征（字段存在、正则匹配），精确判断

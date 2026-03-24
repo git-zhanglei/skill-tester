@@ -120,7 +120,7 @@ class TestCoordinator:
     # ─────────────────────────────────────────────
 
     def record(self, case_id: str, status: str, outcome: str = '',
-               trial: Optional[int] = None) -> bool:
+               trial: Optional[int] = None, session_id: str = '') -> bool:
         """
         记录 Agent 对一个案例的评估结果。
 
@@ -144,6 +144,7 @@ class TestCoordinator:
                     'trial':   trial,
                     'status':  status,
                     'outcome': outcome,
+                    'session_id': session_id,
                     'recorded_at': now,
                 })
                 expected_trials = case.get('trial_count', 3)
@@ -159,6 +160,7 @@ class TestCoordinator:
                     case['result']       = {
                         'status':  agg_status,
                         'outcome': outcome,
+                        'session_id': session_id,
                         'pass_at_k': sum(1 for s in all_statuses if s == TestStatus.PASSED),
                         'k':         expected_trials,
                     }
@@ -166,7 +168,11 @@ class TestCoordinator:
                 # ── Single-trial ──
                 case['status']       = TestStatus.COMPLETED
                 case['completed_at'] = now
-                case['result']       = {'status': status, 'outcome': outcome}
+                case['result']       = {
+                    'status': status,
+                    'outcome': outcome,
+                    'session_id': session_id,
+                }
 
             self._save()
             return True
@@ -248,10 +254,12 @@ def main() -> int:
   python3 parallel_test_runner.py cases.json --prepare
 
   # 记录单次结果
-  python3 parallel_test_runner.py cases.json --record hit_exact_0 --status passed --outcome "输出..."
+  python3 parallel_test_runner.py cases.json --record hit_exact_0 --status passed \\
+      --outcome "输出..." --session-id "session-123"
 
   # 记录多试验中的某次
-  python3 parallel_test_runner.py cases.json --record hit_exact_0 --status passed --trial 2
+  python3 parallel_test_runner.py cases.json --record hit_exact_0 --status passed \\
+      --outcome "输出..." --session-id "session-123" --trial 2
 
   # 生成汇总
   python3 parallel_test_runner.py cases.json --finalize
@@ -265,8 +273,9 @@ def main() -> int:
 
     # --record 附属参数
     parser.add_argument('--status',  choices=['passed', 'failed', 'error'], help='案例结果状态')
-    parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（可选）')
+    parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（必填，建议包含原始输出摘要）')
     parser.add_argument('--trial',   type=int,   help='多试验序号（multi_trial 专用）')
+    parser.add_argument('--session-id', default='', help='sessions_spawn 返回的会话 ID（必填）')
 
     # --prepare 附属参数
     parser.add_argument('--trials', type=int, default=3, help='multi_trial 案例的重复次数（默认 3）')
@@ -287,11 +296,18 @@ def main() -> int:
         if not args.status:
             print('❌ --record 需要同时提供 --status', file=sys.stderr)
             return 1
+        if not args.outcome.strip():
+            print('❌ --record 必须提供非空 --outcome，禁止空结果写入', file=sys.stderr)
+            return 1
+        if not args.session_id.strip():
+            print('❌ --record 必须提供 --session-id（来自 sessions_spawn 结果）', file=sys.stderr)
+            return 1
         ok = coord.record(
             case_id=args.record,
             status=args.status,
             outcome=args.outcome,
             trial=args.trial,
+            session_id=args.session_id,
         )
         if ok:
             print(json.dumps({'recorded': True, 'case_id': args.record,
