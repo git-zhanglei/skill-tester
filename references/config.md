@@ -1,4 +1,4 @@
-# Skill Certifier v3 — 配置说明
+# skill-tester v3 — 配置说明
 
 ## 默认配置
 
@@ -6,7 +6,7 @@
 # 执行设置
 parallel_degree: 4              # 并行 Agent 数量
 timeout_per_test: 60            # 每个测试案例超时（秒）
-max_test_cases: 20              # 最大测试案例总数
+max_test_cases: 15              # 最大测试案例总数
 auto_save_interval: 5           # 每完成 N 个自动保存一次
 
 # 安全检查
@@ -42,33 +42,33 @@ thresholds:
 
 1. 命令行参数（最高）
 2. 环境变量
-3. 配置文件（`~/.skill-certifier/config.yaml`）
+3. 配置文件（`~/.skill-tester/config.yaml`）
 4. 默认值（最低）
 
 ## 环境变量
 
 ```bash
 # 执行
-SKILL_CERTIFIER_PARALLEL=4
-SKILL_CERTIFIER_TIMEOUT=60
-SKILL_CERTIFIER_MAX_CASES=20
+SKILL_TESTER_PARALLEL=4
+SKILL_TESTER_TIMEOUT=60
+SKILL_TESTER_MAX_CASES=15
 
 # 多模型
-SKILL_CERTIFIER_MULTI_MODEL=false
-SKILL_CERTIFIER_MODELS="model-a,model-b"
+SKILL_TESTER_MULTI_MODEL=false
+SKILL_TESTER_MODELS="model-a,model-b"
 
 # 报告
-SKILL_CERTIFIER_FORMAT=markdown
-SKILL_CERTIFIER_OUTPUT=""
+SKILL_TESTER_FORMAT=markdown
+SKILL_TESTER_OUTPUT=""
 
 # 安全
-SKILL_CERTIFIER_SKIP_SAFETY=false
+SKILL_TESTER_SKIP_SAFETY=false
 ```
 
 ## 自定义配置文件
 
 ```yaml
-# ~/.skill-certifier/config.yaml
+# ~/.skill-tester/config.yaml
 parallel_degree: 8
 timeout_per_test: 120
 multi_model: true

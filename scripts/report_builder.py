@@ -454,7 +454,7 @@ class ReportBuilder:
         lines = [
             f'# EVAL — {self.skill_name}',
             '',
-            f'> 由 `skill-certifier` 自动生成，最后更新：{ts}',
+            f'> 由 `skill-tester` 自动生成，最后更新：{ts}',
             '',
             '## 认证结果',
             '',
@@ -539,7 +539,7 @@ class ReportBuilder:
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Skill Certifier v3 报告生成器')
+    parser = argparse.ArgumentParser(description='skill-tester v3 报告生成器')
     parser.add_argument('results_file', help='统一 results JSON 文件路径')
     parser.add_argument('--output', '-o', help='输出 Markdown 报告路径（默认自动命名）')
     parser.add_argument('--json', action='store_true', help='同时输出 JSON 报告')

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-验证 Skill Certifier v3 安装
+验证 skill-tester v3 安装
 检查所有核心组件是否存在
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 def verify():
     """验证安装"""
 
-    print("🔍 验证 skill-certifier v3 安装...\n")
+    print("🔍 验证 skill-tester v3 安装...\n")
 
     skill_dir = Path(__file__).parent
 

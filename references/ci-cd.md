@@ -1,6 +1,6 @@
 # CI/CD 集成
 
-将 Skill Certifier 集成到持续集成流程，在每次提交时自动检测 Skill 质量下降。
+将 skill-tester 集成到持续集成流程，在每次提交时自动检测 Skill 质量下降。
 
 ## 报告获取方式
 
@@ -49,7 +49,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skill-certifier-report
+          name: skill-tester-report
           path: test-report-*.md
 ```
 

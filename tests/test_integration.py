@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Skill Certifier v3 — 集成测试
+skill-tester v3 — 集成测试
 测试静态分析流水线（不依赖 sessions_spawn 的部分）
 
 注意：阶段 3（多 Agent 并行执行）需要真实 OpenClaw 环境，

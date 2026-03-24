@@ -11,7 +11,7 @@ MIN_SUPPORTED_VERSION = "3.0"
 CURRENT_VERSION       = VERSION  # 别名，保持向后兼容
 
 # 输出目录（相对于当前工作目录，由 Agent 在运行时决定路径）
-OUTPUT_BASE_DIR = Path.home() / '.skill-certifier'
+OUTPUT_BASE_DIR = Path.home() / '.skill-tester'
 TEST_CASES_DIR = OUTPUT_BASE_DIR / 'test-cases'
 REPORTS_DIR    = OUTPUT_BASE_DIR / 'reports'
 RESULTS_DIR    = OUTPUT_BASE_DIR / 'results'

@@ -151,4 +151,4 @@
 
 ---
 
-*Skill Certifier v3 — 生成于 {{generated_at}}*
+*skill-tester v3 — 生成于 {{generated_at}}*

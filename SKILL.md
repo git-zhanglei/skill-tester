@@ -5,7 +5,7 @@ user-invocable: true
 source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-evaluation"
 ---
 
-# Skill Certifier
+# skill-tester
 
 对指定的 OpenClaw Skill 进行四维度质量评估，输出可量化的认证报告。
 
@@ -94,7 +94,7 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 > `idempotency_check` 补充：对实时数据类 Skill（天气/股价等），改为验证**输出格式**一致而非数据值一致。
 
-将以下结构保存为 `~/.skill-certifier/test-cases/test-cases-<skill_name>-<timestamp>.json`（后称 `<cases_json>`）。  
+将以下结构保存为 `~/.skill-tester/test-cases/test-cases-<skill_name>-<timestamp>.json`（后称 `<cases_json>`）。  
 **注意**：`safety` 和 `spec_score` 在此处一并写入，`--finalize` 后该文件即可直接用于生成报告，无需额外组装。
 
 ```json

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Skill Certifier v3 — 核心单元测试
+skill-tester v3 — 核心单元测试
 覆盖不依赖 sessions_spawn 的模块
 """
 
