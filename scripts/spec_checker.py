@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Spec Checker v3 — Skill 规范结构检查
+Spec Checker — Skill 规范结构检查
 参考 terwox/skill-evaluator 的 eval-skill.py 扩展而来，适配中文/混合语言 Skill。
 
 14项检查，分 6 类：structure / trigger / documentation / scripts / security / agent_specific
@@ -415,7 +415,7 @@ def print_report(results: List[Dict], skill_path: str, spec_score: float,
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Skill Spec Checker v3')
+    parser = argparse.ArgumentParser(description='Skill Spec Checker')
     parser.add_argument('path', help='Skill 目录路径')
     parser.add_argument('--json', action='store_true', help='JSON 格式输出')
     parser.add_argument('--verbose', '-v', action='store_true', help='显示通过项详情')

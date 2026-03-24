@@ -1,4 +1,4 @@
-# skill-tester v3
+# skill-tester
 
 > OpenClaw Skill 测试与认证框架
 
@@ -77,7 +77,7 @@ python3 verify.py
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      skill-tester v3                         │
+│                       skill-tester                           │
 ├─────────────────────────────────────────────────────────────┤
 │  阶段 1: 安全检查（门控）                                   │
 │  ├─ 危险代码模式 / 凭证泄露 / 个人数据检测                  │
@@ -194,4 +194,4 @@ skill-tester/
 
 ---
 
-**为 OpenClaw 社区用 ❤️ 制作 — skill-tester v3**
+**为 OpenClaw 社区用 ❤️ 制作 — skill-tester**

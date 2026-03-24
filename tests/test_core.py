@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-skill-tester v3 — 核心单元测试
+skill-tester — 核心单元测试
 覆盖不依赖 sessions_spawn 的模块
 """
 
@@ -195,7 +195,7 @@ class TestTestCasesValidator(unittest.TestCase):
 
 
 # ──────────────────────────────────────────────
-# ReportBuilder v3 — 使用实际 API
+# ReportBuilder — 使用实际 API
 # ──────────────────────────────────────────────
 
 class TestReportBuilder(unittest.TestCase):

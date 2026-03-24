@@ -1,4 +1,4 @@
-# skill-tester v3 — 配置说明
+# skill-tester — 配置说明
 
 ## 默认配置
 

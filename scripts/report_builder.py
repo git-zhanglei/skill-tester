@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Report Builder v3 - 基于统一 results JSON 生成认证报告
+Report Builder — 基于统一 results JSON 生成认证报告
 
 输入 JSON 格式（由 Agent 在步骤 5 生成）：
 {
@@ -36,7 +36,7 @@ from constants import (
 
 
 class ReportBuilder:
-    """基于 results JSON 构建 V3 认证报告"""
+    """基于 results JSON 构建认证报告"""
 
     def __init__(self, results: Dict[str, Any]):
         self.results    = results
@@ -539,7 +539,7 @@ class ReportBuilder:
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='skill-tester v3 报告生成器')
+    parser = argparse.ArgumentParser(description='skill-tester 报告生成器')
     parser.add_argument('results_file', help='统一 results JSON 文件路径')
     parser.add_argument('--output', '-o', help='输出 Markdown 报告路径（默认自动命名）')
     parser.add_argument('--json', action='store_true', help='同时输出 JSON 报告')

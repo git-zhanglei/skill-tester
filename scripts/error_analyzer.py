@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Error Analyzer v3 — skill-tester 专用错误诊断器
+Error Analyzer — skill-tester 专用错误诊断器
 将测试执行中出现的错误字符串，匹配到已知类别并给出修复指导。
 """
 

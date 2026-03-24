@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test Coordinator v3 — 配合 Agent 执行测试案例的协调工具
+Test Coordinator — 配合 Agent 执行测试案例的协调工具
 
 职责：执行计划生成 + 结果记录 + 统计汇总
 【重要】实际测试执行（sessions_spawn）必须由 OpenClaw Agent 发起，
@@ -240,7 +240,7 @@ class TestCoordinator:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description='Test Coordinator v3 — 配合 Agent 执行测试',
+        description='Test Coordinator — 配合 Agent 执行测试',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 示例:

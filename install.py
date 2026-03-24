@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-安装 skill-tester v3 到 OpenClaw skills 目录
+安装 skill-tester 到 OpenClaw skills 目录
 """
 
 import os
@@ -24,7 +24,7 @@ def install():
     source_dir = Path(__file__).parent
     shutil.copytree(source_dir, default_install_dir, ignore=shutil.ignore_patterns('.git'))
 
-    print(f"✅ skill-tester v3 已安装到 {default_install_dir}")
+    print(f"✅ skill-tester 已安装到 {default_install_dir}")
     print("\n验证安装：")
     print(f"  python3 {default_install_dir}/verify.py")
     print("\n使用方式：")
