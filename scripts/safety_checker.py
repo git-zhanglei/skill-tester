@@ -75,11 +75,11 @@ class SafetyChecker:
         self._check_skill_md()
         
         # 确定状态
-        critical_issues = [i for i in self.issues if '危险' in i or '后门' in i]
-        
-        if critical_issues:
+        # 注意：self.issues 中的所有条目均为严重问题（包括硬编码凭证），
+        # 任何 issue 都应触发 failed，不能再次过滤。
+        if self.issues:
             status = 'failed'
-        elif self.issues:
+        elif self.warnings:
             status = 'warning'
         else:
             status = 'passed'

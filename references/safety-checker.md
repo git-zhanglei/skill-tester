@@ -1,78 +1,106 @@
-# 安全检查实现
+# 安全检查器
 
-嵌入自 Skill Test 安全评审器。
+## 概述
+
+安全检查是 Skill Certifier v3 的**前置门控**。检查失败将立即终止测试并将综合评分归零。安全检查结果不计入评分，但作为独立状态呈现在报告中。
 
 ## 检查类别
 
-### 1. 危险模式
+### 1. 危险代码模式
 
-检查可能危害系统的命令：
-
-| 模式 | 严重级别 | 描述 |
-|---------|----------|-------------|
-| `rm -rf /` | 严重 | 危险删除 |
-| `> /etc/` | 严重 | 系统文件修改 |
-| `chmod 777` | 高 | 过度宽松权限 |
-| `curl \| sh` | 高 | 管道到 shell |
-| `nc -l` | 高 | Netcat 监听 |
-| 加密货币挖矿 | 严重 | 挖矿软件模式 |
-
-### 2. 凭证模式
-
-检查硬编码密钥：
+检测可能危害系统的命令或操作：
 
 | 模式 | 严重级别 | 描述 |
-|---------|----------|-------------|
-| `api_key = "xxx"` | 严重 | 硬编码 API key |
-| `password = "xxx"` | 严重 | 硬编码密码 |
-| `token = "xxx"` | 严重 | 硬编码 token |
-| AWS 凭证 | 严重 | AWS access keys |
-| 私钥 | 严重 | SSH 私钥 |
+|------|---------|------|
+| `rm -rf /` 或 `rm -rf /*` | ❌ 严重 | 递归删除根目录 |
+| `> /etc/` | ❌ 严重 | 覆写系统配置文件 |
+| `chmod 777 /` | ❌ 严重 | 开放所有权限 |
+| `curl ... \| sh` 或 `wget ... \| sh` | ❌ 严重 | 管道到 Shell 执行 |
+| `nc -l` | ⚠️ 高 | Netcat 监听，可能开放后门 |
+| 加密货币挖矿关键词 | ❌ 严重 | 挖矿软件特征 |
+| `eval(` + 外部输入 | ⚠️ 高 | 动态代码执行风险 |
+| `subprocess.call` + shell=True | ⚠️ 中 | Shell 注入风险 |
 
-### 3. 个人数据模式
+### 2. 凭证泄露模式
 
-检查暴露的个人信息：
+检测硬编码的敏感信息：
 
 | 模式 | 严重级别 | 描述 |
-|---------|----------|-------------|
-| 邮箱地址 | 警告 | user@example.com |
-| SSN 模式 | 严重 | 123-45-6789 |
-| 信用卡号 | 严重 | 1234-5678-9012-3456 |
-| 长数字 | 警告 | 可能的身份证号 |
+|------|---------|------|
+| `api_key\s*=\s*["'][^"']{8,}` | ❌ 严重 | 硬编码 API Key |
+| `password\s*=\s*["'][^"']+` | ❌ 严重 | 硬编码密码 |
+| `token\s*=\s*["'][^"']{16,}` | ❌ 严重 | 硬编码 Token |
+| `AKIA[0-9A-Z]{16}` | ❌ 严重 | AWS Access Key |
+| `-----BEGIN (RSA\|EC\|DSA) PRIVATE KEY` | ❌ 严重 | 私钥文件 |
+| `ghp_[0-9a-zA-Z]{36}` | ❌ 严重 | GitHub PAT |
 
-### 4. 模型特定引用
+### 3. 个人数据暴露
 
-不危险，但会记录：
+检测可能包含个人信息的内容：
 
-- "Claude"
-- "GPT-4"
-- "Codex"
+| 模式 | 严重级别 | 描述 |
+|------|---------|------|
+| 邮箱地址（非 example.com） | ⚠️ 警告 | 真实用户邮箱 |
+| SSN 格式 `\d{3}-\d{2}-\d{4}` | ❌ 严重 | 美国社会安全号 |
+| 信用卡格式 `\d{4}[- ]\d{4}[- ]\d{4}[- ]\d{4}` | ❌ 严重 | 信用卡号 |
+| 手机号格式（11位）| ⚠️ 警告 | 可能的真实手机号 |
+
+### 4. 模型特定引用（记录但不扣分）
+
+以下内容会记录在报告中，但不影响安全状态：
+- "Claude"、"GPT-4"、"Codex" 等特定模型名称
+- 硬编码模型 API 端点
+
+## 安全状态说明
+
+| 状态 | 条件 | 对测试的影响 |
+|------|------|------------|
+| ✅ 通过 | 无严重问题，无警告 | 正常继续 |
+| ⚠️ 警告 | 有警告但无严重问题 | 提示用户后继续 |
+| ❌ 失败 | 发现任意严重问题 | **立即终止，综合评分归零** |
 
 ## 实现
 
-查看 `../scripts/safety_checker.py` 了解完整实现。
+实现细节见 `../scripts/safety_checker.py`。
 
-## 用法
+### 使用方式
 
 ```python
 from safety_checker import SafetyChecker
+from pathlib import Path
 
 checker = SafetyChecker(Path('./my-skill'))
 result = checker.check()
 
-if result['status'] == 'failed':
-    print("发现安全问题！")
-    for issue in result['issues']:
-        print(f"  - {issue}")
+print(result['status'])    # passed / warning / failed
+print(result['issues'])    # 严重问题列表
+print(result['warnings'])  # 警告列表
 ```
 
-## 输出格式
+### 输出格式
 
 ```json
 {
-  "status": "passed|warning|failed",
-  "issues": ["严重问题 1", "严重问题 2"],
-  "warnings": ["警告 1", "警告 2"],
-  "checked_files": ["SKILL.md", "scripts/helper.py"]
+  "status": "passed",
+  "issues": [],
+  "warnings": [
+    "发现邮箱地址：user@example.com（第 45 行）"
+  ],
+  "checked_files": [
+    "SKILL.md",
+    "scripts/helper.py",
+    "references/config.md"
+  ],
+  "checked_at": "2026-03-23T10:00:00"
 }
 ```
+
+## 绕过安全检查
+
+仅用于调试或已知安全的场景，**不推荐生产使用**：
+
+```bash
+测试skill ~/skills/my-skill/ --skip-safety
+```
+
+绕过时报告中会明确标注"安全检查已跳过"。

@@ -1,273 +1,258 @@
 #!/usr/bin/env python3
 """
-Error Analyzer - Detailed error diagnosis and suggestions
+Error Analyzer v3 — skill-certifier 专用错误诊断器
+将测试执行中出现的错误字符串，匹配到已知类别并给出修复指导。
 """
 
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from pathlib import Path
 
 
 class ErrorAnalyzer:
-    """Analyze test errors and provide detailed diagnostics"""
-    
-    # Error patterns and their solutions
-    ERROR_PATTERNS = {
-        'trigger_not_found': {
+    """分析测试错误并提供详细诊断"""
+
+    ERROR_PATTERNS: Dict[str, Dict] = {
+
+        'skill_path_not_found': {
             'patterns': [
-                r'trigger.*not.*found',
-                r'触发词.*未找到',
-                r'keyword.*not.*match',
+                r'SKILL\.md.*not found',
+                r'skill.*路径.*不存在',
+                r'No such file.*SKILL',
+                r'FileNotFoundError',
             ],
-            'category': '配置错误',
-            'suggestion': '检查 SKILL.md 中的触发词定义',
+            'category': '路径错误',
+            'suggestion': '确认 skill_path 参数指向一个包含 SKILL.md 的目录',
             'fix_steps': [
-                '打开 SKILL.md',
-                '查找 description 中的触发词列表',
-                '确认测试输入是否在列表中',
-                '如需添加，更新 description 和触发词文档'
+                '检查路径是否正确：ls <skill_path>/SKILL.md',
+                '如路径含空格，用引号包裹',
+                '确认目标 Skill 已正确解压/克隆到本地',
             ],
-            'doc_link': 'references/test-cases.md'
+            'doc_link': 'references/troubleshooting.md',
         },
-        'api_key_missing': {
+
+        'safety_check_blocked': {
             'patterns': [
-                r'AK.*not.*configured',
-                r'API.*key.*missing',
-                r'未配置.*AK',
-                r'签名无效',
-                r'401',
+                r'safety.*failed',
+                r'安全检查.*失败',
+                r'dangerous.*pattern',
+                r'硬编码.*密码',
+                r'credential.*detected',
             ],
-            'category': '认证错误',
-            'suggestion': '配置 API 密钥',
+            'category': '安全检查阻断',
+            'suggestion': '目标 Skill 存在危险模式或硬编码凭证，必须先修复',
             'fix_steps': [
-                '获取 AK 密钥',
-                '运行 configure 命令：cli.py configure YOUR_AK',
-                '验证配置：cli.py check'
+                '运行 python3 scripts/safety_checker.py <skill_path> 查看详细问题',
+                '移除脚本中的硬编码 API Key、密码、token',
+                '用环境变量替代，通过 os.environ.get() 在脚本中读取',
+                '修复后重新运行 safety_checker.py 确认通过',
             ],
-            'doc_link': 'references/capabilities/configure.md'
+            'doc_link': 'references/safety-checker.md',
         },
-        'shop_not_bound': {
+
+        'openclaw_unavailable': {
             'patterns': [
-                r'shop.*not.*bound',
-                r'店铺未绑定',
-                r'no.*shop.*found',
+                r'OPENCLAW_AVAILABLE',
+                r'sessions_spawn.*not.*available',
+                r'OpenClaw.*不可用',
+                r'openclaw_not_available',
             ],
-            'category': '配置错误',
-            'suggestion': '绑定下游店铺',
+            'category': 'OpenClaw 环境不可用',
+            'suggestion': '步骤 4 的执行需要在 OpenClaw Agent 环境中运行',
             'fix_steps': [
-                '打开 1688 AI版 APP',
-                '进入「一键开店」',
-                '完成店铺绑定',
-                '重新运行命令'
+                '确认已在 OpenClaw 环境中（不是本地 Python 脚本直接运行）',
+                '检查 OPENCLAW_AVAILABLE 环境变量是否已设置',
+                '在 OpenClaw Agent 中执行，Agent 会自动调用 sessions_spawn',
+                '参见 SKILL.md 步骤 4 的执行说明',
             ],
-            'doc_link': 'references/faq/new-store.md'
+            'doc_link': 'SKILL.md',
         },
-        'rate_limited': {
+
+        'spec_score_low': {
             'patterns': [
-                r'rate.*limit',
-                r'限流',
-                r'429',
-                r'too.*many.*request',
+                r'spec_score.*[0-3]\d',
+                r'规范.*得分.*低',
+                r'token_cost.*fail',
+                r'valid_frontmatter.*fail',
             ],
-            'category': '限流错误',
-            'suggestion': '等待后重试',
+            'category': '规范得分不达标',
+            'suggestion': '运行 spec_checker.py --verbose 查看具体失败项',
             'fix_steps': [
-                '等待 1-2 分钟',
-                '降低请求频率',
-                '检查是否有循环调用'
+                'python3 scripts/spec_checker.py <skill_path> --verbose',
+                '修复所有 ❌ 项（如 frontmatter 缺失、行数过多）',
+                '处理 ⚠️ 项（如无 Guardrails 章节、description 无触发语境）',
+                '目标：spec_score ≥ 70',
             ],
-            'doc_link': 'references/common/error-handling.md'
+            'doc_link': 'references/test-cases.md',
         },
-        'network_error': {
+
+        'test_generation_empty': {
             'patterns': [
-                r'network.*error',
-                r'connection.*refused',
+                r'no.*test.*cases',
+                r'cases.*empty',
+                r'测试案例.*为空',
+                r'generate.*0.*cases',
+            ],
+            'category': '测试案例生成失败',
+            'suggestion': '目标 SKILL.md 描述不足，Agent 无法泛化出测试案例',
+            'fix_steps': [
+                '检查目标 SKILL.md 是否有 description、触发词、预期输出说明',
+                '至少提供 2-3 个使用示例',
+                '声明 Skill 的预期输出格式或结果',
+            ],
+            'doc_link': 'references/test-cases.md',
+        },
+
+        'session_timeout': {
+            'patterns': [
                 r'timeout',
-                r'网络错误',
-                r'连接超时',
+                r'timed.*out',
+                r'超时',
+                r'TimeoutError',
             ],
-            'category': '网络错误',
-            'suggestion': '检查网络连接',
+            'category': '执行超时',
+            'suggestion': '增大 --timeout 参数，或检查目标 Skill 的性能问题',
             'fix_steps': [
-                '检查网络连接',
-                '确认 1688 API 可访问',
-                '检查代理设置',
-                '稍后重试'
+                '增加超时：--timeout 120（默认 60 秒）',
+                '检查目标 Skill 是否有阻塞调用（如同步等待网络）',
+                '对慢 Skill 单独设置较大 timeout',
+                '查看 references/troubleshooting.md 了解超时调试方法',
             ],
-            'doc_link': 'references/common/error-handling.md'
+            'doc_link': 'references/troubleshooting.md',
         },
-        'invalid_parameter': {
+
+        'results_file_not_found': {
             'patterns': [
-                r'invalid.*parameter',
-                r'参数错误',
-                r'required.*argument',
-                r'missing.*required',
+                r'results.*json.*not.*found',
+                r'报告.*文件.*不存在',
+                r'report_builder.*FileNotFoundError',
             ],
-            'category': '参数错误',
-            'suggestion': '检查命令参数',
+            'category': '报告文件缺失',
+            'suggestion': '步骤 4 完成后，results JSON 文件才能生成；确认步骤 4 已成功执行',
             'fix_steps': [
-                '查看命令帮助：cli.py <command> --help',
-                '确认所有必需参数已提供',
-                '检查参数格式是否正确'
+                '确认步骤 4 的所有案例均已通过 --record 记录',
+                '执行 --finalize 生成完整 results JSON',
+                '检查文件路径参数是否正确传入 report_builder.py',
             ],
-            'doc_link': 'references/capabilities/'
+            'doc_link': 'references/report-template.md',
         },
-        'command_not_found': {
+
+        'spec_checker_crash': {
             'patterns': [
-                r'command.*not.*found',
-                r'unknown.*command',
-                r'未识别的命令',
+                r'spec_checker.*crash',
+                r'检查崩溃',
+                r'spec_checker.*Error',
             ],
-            'category': '命令错误',
-            'suggestion': '使用有效的命令',
+            'category': 'spec_checker 崩溃',
+            'suggestion': '目标 Skill 的 scripts/ 中可能有无法读取的文件',
             'fix_steps': [
-                '查看可用命令：cli.py --help',
-                '检查命令拼写',
-                '确认 skill 已正确安装'
+                'python3 scripts/spec_checker.py <skill_path> --verbose',
+                '检查 scripts/ 目录下是否有编码异常的 .py 文件',
+                '确认 SKILL.md 以 UTF-8 编码保存',
             ],
-            'doc_link': 'SKILL.md'
+            'doc_link': 'references/troubleshooting.md',
         },
-        'skill_not_activated': {
-            'patterns': [
-                r'skill.*not.*activated',
-                r'未触发',
-                r'no.*skill.*matched',
-            ],
-            'category': '触发错误',
-            'suggestion': '检查触发词配置',
-            'fix_steps': [
-                '确认输入包含触发词',
-                '检查触发词拼写',
-                '查看 SKILL.md 中的触发词列表'
-            ],
-            'doc_link': 'SKILL.md'
-        }
     }
-    
+
     def __init__(self, skill_path: Path):
         self.skill_path = skill_path
-        self.skill_md = skill_path / 'SKILL.md'
-    
+
     def analyze(self, error: str, test_case: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze error and provide detailed diagnosis"""
+        """匹配错误字符串，返回详细诊断"""
         error_lower = error.lower()
-        
-        # Try to match error patterns
-        for error_type, config in self.ERROR_PATTERNS.items():
-            for pattern in config['patterns']:
-                if re.search(pattern, error_lower, re.IGNORECASE):
-                    return self._build_diagnosis(error_type, config, error, test_case)
-        
-        # Generic error if no pattern matched
+        for error_type, cfg in self.ERROR_PATTERNS.items():
+            for pat in cfg['patterns']:
+                if re.search(pat, error_lower, re.IGNORECASE):
+                    return self._build_diagnosis(error_type, cfg, error, test_case)
         return self._build_generic_diagnosis(error, test_case)
-    
-    def _build_diagnosis(self, error_type: str, config: Dict, 
-                         original_error: str, test_case: Dict) -> Dict[str, Any]:
-        """Build detailed diagnosis for known error types"""
+
+    def _build_diagnosis(self, error_type: str, cfg: Dict,
+                         original: str, test_case: Dict) -> Dict[str, Any]:
         return {
-            'error_type': error_type,
-            'category': config['category'],
-            'original_error': original_error,
-            'suggestion': config['suggestion'],
-            'fix_steps': config['fix_steps'],
-            'doc_link': config['doc_link'],
-            'severity': self._calculate_severity(error_type, test_case),
-            'test_context': {
+            'error_type':    error_type,
+            'category':      cfg['category'],
+            'original_error': original,
+            'suggestion':    cfg['suggestion'],
+            'fix_steps':     cfg['fix_steps'],
+            'doc_link':      cfg['doc_link'],
+            'severity':      self._severity(error_type, test_case),
+            'test_context':  {
                 'dimension': test_case.get('dimension'),
-                'input': test_case.get('input'),
-                'expected': test_case.get('expected')
-            }
+                'input':     test_case.get('input'),
+                'expected':  test_case.get('expected'),
+            },
         }
-    
+
     def _build_generic_diagnosis(self, error: str, test_case: Dict) -> Dict[str, Any]:
-        """Build generic diagnosis for unknown errors"""
         return {
-            'error_type': 'unknown',
-            'category': '未知错误',
+            'error_type':    'unknown',
+            'category':      '未知错误',
             'original_error': error,
-            'suggestion': '查看详细错误信息',
+            'suggestion':    '查看 references/troubleshooting.md 获取调试指南',
             'fix_steps': [
-                '检查错误日志',
-                '查看 SKILL.md 文档',
-                '在测试环境复现问题',
-                '联系 skill 维护者'
+                '检查完整错误日志',
+                '运行 python3 verify.py 确认工程文件完整',
+                '参见 references/troubleshooting.md',
             ],
-            'doc_link': 'references/common/error-handling.md',
-            'severity': 'medium',
+            'doc_link': 'references/troubleshooting.md',
+            'severity':  'medium',
             'test_context': {
                 'dimension': test_case.get('dimension'),
-                'input': test_case.get('input'),
-                'expected': test_case.get('expected')
-            }
+                'input':     test_case.get('input'),
+                'expected':  test_case.get('expected'),
+            },
         }
-    
-    def _calculate_severity(self, error_type: str, test_case: Dict) -> str:
-        """Calculate error severity based on type and context"""
-        critical_errors = ['api_key_missing', 'shop_not_bound']
-        high_errors = ['trigger_not_found', 'skill_not_activated', 'command_not_found']
-        
-        if error_type in critical_errors:
+
+    @staticmethod
+    def _severity(error_type: str, test_case: Dict) -> str:
+        critical = {'safety_check_blocked', 'skill_path_not_found'}
+        high     = {'openclaw_unavailable', 'spec_score_low', 'test_generation_empty'}
+        if error_type in critical:
             return 'critical'
-        elif error_type in high_errors:
+        if error_type in high or test_case.get('dimension') == 'hit_rate':
             return 'high'
-        elif test_case.get('dimension') == 'hit_rate':
-            return 'high'  # Trigger issues are always high
-        else:
-            return 'medium'
-    
+        return 'medium'
+
     def format_diagnosis(self, diagnosis: Dict[str, Any]) -> str:
-        """Format diagnosis for display"""
+        """格式化为人类可读文本"""
         lines = [
-            f"❌ 错误类型: {diagnosis['category']}",
-            f"   详细信息: {diagnosis['original_error'][:100]}",
-            f"   严重程度: {diagnosis['severity'].upper()}",
-            f"",
-            f"💡 建议: {diagnosis['suggestion']}",
-            f"",
-            f"🔧 修复步骤:",
+            f'❌ 错误类型：{diagnosis["category"]}',
+            f'   原始错误：{diagnosis["original_error"][:100]}',
+            f'   严重程度：{diagnosis["severity"].upper()}',
+            '',
+            f'💡 建议：{diagnosis["suggestion"]}',
+            '',
+            '🔧 修复步骤：',
         ]
-        
         for i, step in enumerate(diagnosis['fix_steps'], 1):
-            lines.append(f"   {i}. {step}")
-        
-        lines.extend([
-            f"",
-            f"📖 参考文档: {diagnosis['doc_link']}",
-        ])
-        
-        if diagnosis['test_context']['input']:
-            lines.extend([
-                f"",
-                f"📝 测试上下文:",
-                f"   输入: '{diagnosis['test_context']['input']}'",
-                f"   期望: {diagnosis['test_context']['expected']}",
-            ])
-        
+            lines.append(f'   {i}. {step}')
+        lines += ['', f'📖 参考文档：{diagnosis["doc_link"]}']
+        ctx = diagnosis.get('test_context', {})
+        if ctx.get('input'):
+            lines += ['', '📝 测试上下文：',
+                      f'   输入：\'{ctx["input"]}\'',
+                      f'   预期：{ctx["expected"]}']
         return '\n'.join(lines)
 
 
 if __name__ == '__main__':
     import sys
-    
+
     if len(sys.argv) < 2:
-        print("Usage: error_analyzer.py <skill-path>")
+        print('用法: error_analyzer.py <skill-path>')
         sys.exit(1)
-    
+
     analyzer = ErrorAnalyzer(Path(sys.argv[1]))
-    
-    # Test cases
-    test_errors = [
-        'Trigger not found: 铺货失败',
-        'AK not configured',
-        'Network timeout after 30s',
-        'Unknown error occurred'
+    demo_errors = [
+        ('SKILL.md not found', {'dimension': 'hit_rate', 'input': 'test', 'expected': 'activate'}),
+        ('safety check failed: dangerous pattern detected',
+         {'dimension': 'execution_success', 'input': 'rm -rf /', 'expected': 'reject'}),
+        ('OpenClaw 不可用，sessions_spawn not available',
+         {'dimension': 'execution_success', 'input': 'run task', 'expected': 'success'}),
+        ('timeout after 60s', {'dimension': 'agent_comprehension', 'input': 'slow task', 'expected': 'output'}),
     ]
-    
-    print("Error Analysis Demo:")
-    print("=" * 60)
-    
-    for error in test_errors:
-        test_case = {'dimension': 'hit_rate', 'input': 'test', 'expected': 'activate'}
-        diagnosis = analyzer.analyze(error, test_case)
-        print(analyzer.format_diagnosis(diagnosis))
-        print("\n" + "=" * 60 + "\n")
+    sep = '=' * 60
+    for err, tc in demo_errors:
+        diag = analyzer.analyze(err, tc)
+        print(analyzer.format_diagnosis(diag))
+        print(f'\n{sep}\n')

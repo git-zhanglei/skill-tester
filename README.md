@@ -1,47 +1,50 @@
-# Skill Certifier
+# Skill Certifier v3
 
-> OpenClaw skill 综合测试和认证框架
+> OpenClaw Skill 测试与认证框架
 
-[![版本](https://img.shields.io/badge/version-1.0.0-blue.svg)](./_meta.json)
+[![版本](https://img.shields.io/badge/version-3.0.0-blue.svg)](./_meta.json)
 [![许可证](https://img.shields.io/badge/license-MIT-green.svg)](./SKILL.md)
 
 ## 概述
 
-Skill Certifier 将 skill 评估从主观的"好/坏"转变为客观的、可量化的指标。它提供自动化测试、多维度质量评估和专业认证报告。
+Skill Certifier 将 Skill 评估从主观的「好/坏」转变为客观、可量化的指标。通过 4 个阶段对目标 Skill 进行全面测试，输出包含安全状态、触发命中率、Skill规范程度、Agent理解度、执行成功率等维度的专业报告。
 
 ## 特性
 
-### 🔒 安全第一
-- 自动化安全预检
-- 恶意代码检测
-- 凭证泄露检测
-- 个人数据暴露检查
+### 🔒 安全门控
+- 前置安全检查，发现严重问题立即终止
+- 检查危险代码、凭证泄露、个人数据暴露
 
-### 📊 定量指标
-- **触发命中率** (25%): 触发词激活准确度
-- **任务成功率** (30%): 任务完成百分比
-- **分支覆盖率** (20%): 代码路径覆盖
-- **工具调用准确度** (15%): 工具选择精确度
-- **错误处理** (10%): 异常覆盖
+### 📊 4 维度量化评分
 
-### 🤖 并行执行
-- 多代理并行测试（默认：4 个代理）
-- 可配置并行度
-- 隔离测试环境
-- 自动清理
+| 维度 | 权重 | 说明 |
+|------|------|------|
+| 触发命中率 | 25% | 触发词精确/模糊/负面测试 |
+| Skill规范程度 | 20% | SKILL.md 格式与 OpenClaw 规范符合度 |
+| Agent理解度 | 25% | Agent 是否准确理解并执行 Skill 意图 |
+| 执行成功率 | 30% | 正常路径、边界、异常场景通过率 |
+
+### 🤖 多 Agent 并行执行
+- 默认 4 个 Agent 并行（可配置）
+- 支持多模型分发：自动检测 OpenClaw 配置的模型，分散执行不同测试案例
+- 独立会话隔离，测试互不干扰
+
+### 🧠 Agent 泛化测试案例生成
+- 调度 Agent 深度解析 SKILL.md
+- 自动生成覆盖 4 个维度的多场景测试案例
+- 支持自定义测试用例扩充
 
 ### 📝 专业报告
-- 带总分的执行摘要
-- 按维度的详细测试结果
-- 定性评估（结构/实用性/领域）
-- 优先级排序的优化建议
+- Markdown 报告（人类可读）
+- JSON 报告（CI/CD 集成）
+- 多模型对比报告（启用 `--multi-model` 时）
 
 ## 快速开始
 
 ### 安装
 
 ```bash
-# 克隆或复制到 skills 目录
+# 复制到 skills 目录
 cd ~/.openclaw/workspace/skills/skill-certifier
 
 # 验证安装
@@ -51,205 +54,141 @@ python3 verify.py
 ### 基本用法
 
 ```bash
-# 测试 skill
-测试skill ./my-skill/
+# 基础测试（交互式）
+测试skill ~/skills/my-skill/
 
-# 自定义并行度
-测试skill ./my-skill/ --parallel 8
+# 自动确认（CI/CD）
+测试skill ~/skills/my-skill/ --yes
 
-# 带 API key
-测试skill ./my-skill/ --env API_KEY=xxx,SECRET=yyy
+# 多模型并行
+测试skill ~/skills/my-skill/ --multi-model
 
-# JSON 输出
-测试skill ./my-skill/ --format json --output report.json
+# 完整认证
+测试skill ~/skills/my-skill/ --yes --output-json --multi-model
+
+# 使用已有测试案例集
+测试skill ~/skills/my-skill/ --test-cases ./test-cases-my-skill-20260323.json
+
+# 从断点继续
+测试skill ~/skills/my-skill/ --resume
 ```
 
 ## 测试流程
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   Skill-Certifier                           │
+│                    Skill Certifier v3                        │
 ├─────────────────────────────────────────────────────────────┤
+│  阶段 1: 安全检查（门控）                                   │
+│  ├─ 危险代码模式 / 凭证泄露 / 个人数据检测                  │
+│  └─ 通过→继续 / 警告→提示继续 / 失败→终止                  │
 │                                                             │
-│  阶段 1: 安全预检                                           │
-│  ├─ 恶意代码检测                                            │
-│  ├─ 凭证泄露检查                                            │
-│  └─ 个人数据暴露扫描                                        │
+│  阶段 2: 测试案例生成                                       │
+│  ├─ Agent 解析 SKILL.md，泛化多场景测试案例                 │
+│  ├─ 覆盖触发命中率/规范/理解度/执行成功率 4 维度            │
+│  └─ 保存 JSON 测试案例集，用户确认                          │
 │                                                             │
-│  阶段 2: 深度分析                                           │
-│  ├─ 解析 SKILL.md                                           │
-│  ├─ 提取触发词、工具、工作流                                │
-│  └─ 生成测试策略                                            │
+│  阶段 3: 多 Agent 并行执行                                  │
+│  ├─ sessions_spawn 创建隔离会话                             │
+│  ├─ 多模型分发（可选）                                      │
+│  └─ 实时更新进度，持久化结果                                │
 │                                                             │
-│  阶段 3: 多维度测试                                         │
-│  ├─ 命中率测试（并行）                                      │
-│  ├─ 成功率测试（并行）                                      │
-│  ├─ 分支覆盖测试（并行）                                    │
-│  └─ 工具准确度测试（并行）                                  │
-│                                                             │
-│  阶段 4: 定性评估                                           │
-│  ├─ 结构评审器                                              │
-│  ├─ 实用性评审器                                            │
-│  └─ 领域评审器                                              │
-│                                                             │
-│  阶段 5: 报告生成                                           │
-│  └─ 集成定量 + 定性报告                                     │
-│                                                             │
+│  阶段 4: 报告生成                                           │
+│  └─ 4 维度评分 + 综合评分 + 优化建议                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 配置
+## 评分体系
 
-### 默认配置
-
-```yaml
-# ~/.skill-certifier/config.yaml
-parallel_degree: 4
-timeout_per_test: 60
-max_test_cases_per_dimension: 20
-
-weights:
-  hit_rate: 25
-  success_rate: 30
-  branch_coverage: 20
-  tool_accuracy: 15
-  error_handling: 10
-
-thresholds:
-  excellent: 80
-  good: 60
-  acceptable: 40
+```
+综合评分 = 触发命中率×25% + Skill规范程度×20% + Agent理解度×25% + 执行成功率×30%
 ```
 
-### 环境变量
+**评级：**
+- ⭐⭐⭐⭐⭐ 优秀（80–100）
+- ⭐⭐⭐⭐ 良好（60–79）
+- ⭐⭐⭐ 可接受（40–59）
+- ⭐⭐ 需改进（0–39）
+- ❌ 不合格（安全检查失败）
 
-```bash
-export SKILL_CERTIFIER_PARALLEL=8
-export SKILL_CERTIFIER_TIMEOUT=120
-export SKILL_CERTIFIER_FORMAT=markdown
-```
+**特殊规则：**
+- 安全检查失败 → 综合评分强制为 0
+- 任意单维度低于 40 → 最终评级不超过 ⭐⭐⭐
 
-## 报告示例
+## 命令行参数
 
-```markdown
-# Skill 评估报告: my-skill
+| 参数 | 简写 | 说明 | 默认值 |
+|------|------|------|--------|
+| `--yes` | `-y` | 跳过确认 | false |
+| `--parallel` | `-p` | 并行度 | 4 |
+| `--timeout` | `-t` | 超时时间（秒） | 60 |
+| `--output-json` | — | 同时输出 JSON 报告 | false |
+| `--multi-model` | — | 启用多模型分发 | false |
+| `--models` | — | 指定模型列表 | 自动检测 |
+| `--test-cases` | `-c` | 加载已有测试案例集 | — |
+| `--resume` | `-r` | 断点续测 | false |
+| `--skip-safety` | — | 跳过安全检查 | false |
+| `--custom-tests` | — | 自定义测试用例 YAML | — |
+| `--output` | `-o` | 报告输出路径 | 自动命名 |
+| `--debug` | `-d` | 交互式调试模式 | false |
 
-**生成时间:** 2024-01-15 10:30:00
-**总分:** 87.5/100
-**建议:** ⭐⭐⭐⭐⭐ 优秀
-
-## 1. 执行摘要
-
-此 skill 在所有指标上表现出色...
-
-### 关键指标
-
-| 指标 | 分数 | 状态 |
-|--------|-------|--------|
-| 总分 | 87.5/100 | ✅ |
-| 安全 | ✅ 通过 | 通过 |
-| 触发命中率 | 92.0% | ✅ |
-| 任务成功率 | 85.0% | ✅ |
-
-## 6. 优化建议
-
-### 高优先级
-1. **结构：添加代码示例**
-   - 影响：结构分数 85/100
-   - 建议：添加代码示例以提高清晰度
-
-### 中优先级
-1. **领域：添加认证说明**
-   - 影响：领域分数 75/100
-   - 建议：添加获取 API key 的章节
-```
-
-## 架构
+## 目录结构
 
 ```
 skill-certifier/
-├── SKILL.md                    # 主文档
-├── skill-certifier             # CLI 入口
-├── _meta.json                  # 元数据
-├── scripts/                    # 核心脚本
-│   ├── certifier.py           # 主协调器
-│   ├── safety_checker.py      # 安全检查
-│   ├── test_generator.py      # 测试用例生成
-│   ├── test_executor.py       # 并行测试执行
-│   ├── qualitative_reviewers.py # 质量评估
-│   └── report_generator_cn.py # 报告生成（中文）
-├── references/                 # 文档
-│   ├── config.md              # 配置指南
-│   ├── test-cases.md          # 测试用例指南
-│   ├── executors.md           # 执行详情
-│   ├── reviewers.md           # 评审器文档
-│   ├── safety-checker.md      # 安全检查指南
-│   └── report-template.md     # 报告模板
-└── examples/                   # 用法示例
-    └── example-usage.md
+├── SKILL.md                    # 主文档（≤500行）
+├── _meta.json                  # 元数据（v3.0.0）
+├── README.md                   # 本文件
+├── verify.py                   # 安装验证脚本
+├── scripts/
+│   ├── certifier_v3.py         # 主协调器（v3）
+│   ├── safety_checker.py       # 安全检查
+│   ├── smart_test_generator.py # Agent 泛化测试案例生成
+│   ├── parallel_test_runner.py # 多 Agent 并行执行
+│   ├── openclaw_executor.py    # OpenClaw 会话执行器
+│   ├── qualitative_reviewers.py # 规范/理解度评审
+│   ├── report_builder.py       # 报告生成
+│   └── constants.py            # 常量定义
+├── references/
+│   ├── config.md               # 配置说明
+│   ├── test-cases.md           # 测试案例格式与维度
+│   ├── executors.md            # 多 Agent 执行细节
+│   ├── reviewers.md            # 评审器实现
+│   ├── safety-checker.md       # 安全检查实现
+│   └── ci-cd.md                # CI/CD 集成指南
+└── examples/
+    └── example-usage.md        # 使用示例
 ```
 
-## 与 Skill Test 对比
+## 社区发布标准
 
-| 特性 | Skill Test | Skill Certifier |
-|---------|-----------|-----------------|
-| 目标用户 | 最终用户 | Skill 开发者 |
-| 测试阶段 | 安装前 | 发布前 |
-| 指标 | 定性 | 定量 + 定性 |
-| 并行执行 | ❌ | ✅（默认 4 代理） |
-| 工具调用测试 | ❌ | ✅ |
-| 命中率指标 | ❌ | ✅ |
-| 分支覆盖 | ❌ | ✅ |
-| 专业报告 | 简单 | 综合 |
-| CI/CD 集成 | ❌ | ✅ |
+| 指标 | 最低要求 | 推荐标准 |
+|------|----------|----------|
+| 安全检查 | 通过 | 通过（无警告） |
+| 触发命中率 | ≥ 85% | ≥ 95% |
+| Skill规范程度 | ≥ 70% | ≥ 90% |
+| Agent理解度 | ≥ 70% | ≥ 85% |
+| 执行成功率 | ≥ 75% | ≥ 90% |
+| 综合评分 | ≥ 70（⭐⭐⭐⭐） | ≥ 85（⭐⭐⭐⭐⭐） |
+
+## 与历史版本对比
+
+| 特性 | V1 | V2 | V3 |
+|------|----|----|-----|
+| 流程 | 5阶段连续 | 分阶段+确认 | 4阶段+门控安全 |
+| 评分维度 | 5维度（混乱） | 3维度（不统一） | **4维度（统一）** |
+| 多模型 | ❌ | ❌ | **✅** |
+| Agent泛化测试案例 | ❌ | 部分 | **✅** |
+| Agent理解度测试 | ❌ | ❌ | **✅** |
+| Skill规范检查 | 基础 | 基础 | **完整** |
+| CI/CD | 困难 | 支持 | **原生支持** |
+| 断点续测 | ❌ | ✅ | ✅ |
+| 文档一致性 | 低 | 低 | **高** |
 
 ## 故障排除
 
-### 测试挂起
-
-```bash
-# 增加超时
-测试skill ./my-skill/ --timeout 120
-
-# 降低并行度
-测试skill ./my-skill/ --parallel 2
-```
-
-### 覆盖率低
-
-```bash
-# 添加自定义测试用例
-# 编辑 ~/.skill-certifier/custom-tests.yaml
-
-# 详细输出运行
-测试skill ./my-skill/ --verbose
-```
-
-### 安全警告
-
-```bash
-# 先检查安全问题
-测试skill ./my-skill/ --skip-safety
-```
-
-## 贡献
-
-1. Fork 仓库
-2. 创建功能分支
-3. 进行更改
-4. 彻底测试
-5. 提交 pull request
-
-## 许可证
-
-MIT - 详情见 [SKILL.md](./SKILL.md)
-
-## 致谢
-
-- 嵌入逻辑来自 [Skill Test](https://clawhub.ai/ivangdavila/skill-test) by @ivangdavila
-- 受软件测试最佳实践启发
-- 为 OpenClaw 社区构建
+详见 [references/troubleshooting.md](./references/troubleshooting.md)（如不存在请参考 SKILL.md 故障排除章节）。
 
 ---
 
-**为 OpenClaw 社区用 ❤️ 制作**
+**为 OpenClaw 社区用 ❤️ 制作 — Skill Certifier v3**

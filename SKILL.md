@@ -1,578 +1,274 @@
 ---
-name: skill-certifier
-description: "OpenClaw skill测试和认证框架V2。新流程：1)内置skill test验证 2)生成测试案例集 3)用户确认 4)并行执行 5)生成报告。触发词：'测试skill', 'skill测试', '评估skill'"
+name: skill-tester
+description: "测试并认证一个 OpenClaw Skill 的质量，输出包含安全评分、触发命中率、规范程度、Agent理解度和执行成功率的完整报告。当用户说「测试skill」「skill测试」「评估skill」「certify skill」时触发。"
+user-invocable: true
+source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-evaluation"
 ---
 
-# Skill Certifier V2
+# Skill Certifier
 
-OpenClaw skill 测试和认证框架，采用全新的测试流程。
+对指定的 OpenClaw Skill 进行四维度质量评估，输出可量化的认证报告。
 
-## 新流程概述
+## Guardrails
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Skill Certifier V2                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  阶段 0: 内置 Skill Test 验证                               │
-│  ├─ 安全检查（恶意代码、凭证泄露）                          │
-│  ├─ 结构评审（SKILL.md 格式）                               │
-│  ├─ 实用性评审（清晰度、可操作性）                          │
-│  └─ 输出：初次扫描结论                                      │
-│                                                             │
-│  阶段 1: 生成测试案例集                                     │
-│  ├─ 深度分析 SKILL.md                                       │
-│  ├─ 提取触发词、工具依赖                                    │
-│  ├─ 生成多维度测试案例                                      │
-│  └─ 输出：保存到本地 JSON 文件                              │
-│                                                             │
-│  阶段 2: 用户确认                                           │
-│  ├─ 展示测试案例集概览                                      │
-│  ├─ 显示测试用例详情                                        │
-│  └─ 等待用户确认开始执行                                    │
-│                                                             │
-│  阶段 3: 并行执行测试                                       │
-│  ├─ 创建子 agent                                            │
-│  ├─ 并行执行每条测试案例                                    │
-│  ├─ 实时标记完成状态                                        │
-│  └─ 更新测试案例集                                          │
-│                                                             │
-│  阶段 4: 生成最终报告                                       │
-│  ├─ 基于完成的测试案例集                                    │
-│  ├─ 计算各维度评分                                          │
-│  └─ 输出：Markdown 报告                                     │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+- **不测试生产数据**：若目标 Skill 涉及真实用户数据，拒绝执行并提示用户使用测试数据
+- **安全失败即终止**：步骤 1 返回 `failed` 时立即停止，综合评分为 0
+- **不泄露内部实现**：不向用户展示目标 Skill 脚本的源码
+- **不自我测试**：若目标路径即本 Skill，拒绝并提示循环依赖
+- **防止测试数据污染**：子 Agent 不得事先知晓预期结果，由主 Agent 事后独立评估
 
-## 快速开始
+---
 
-**1分钟上手：**
+## 执行步骤
+
+### 前置：解析参数
+
+从用户消息中提取：
+
+- **`<skill_path>`**：目标 Skill 目录（含 `SKILL.md`）。未提供则询问
+- `--yes` / `-y`：跳过步骤 3 用户确认
+- `--parallel <n>`：并行 Agent 数（默认 4）
+- `--timeout <n>`：每案例超时秒（默认 60）
+- `--trials <n>`：critical 案例重复次数（默认 3，用于 pass@k）
+- `--output-json`：同时生成 JSON 报告
+- `--dry-run`：仅执行步骤 1-2，不启动 sessions_spawn（适合 CI 快速检查）
+- `--validate`：先对本 Skill 自身运行，验证评分基线后再测目标
+- `--eval-md`：将评估摘要写入 `<skill_path>/EVAL.md`（随 Skill 版本管理）
+- `--skip-safety`：跳过步骤 1（仅调试用）
+
+---
+
+### 步骤 1：安全检查（门控）
 
 ```bash
-# 基础测试（交互式）
-测试skill ~/skills/my-skill/
-
-# 自动测试（CI/CD推荐）
-测试skill ~/skills/my-skill/ --yes --output-json
-
-# 完整认证（生成所有报告）
-测试skill ~/skills/my-skill/ --yes --output-json --visual
+python3 {baseDir}/scripts/safety_checker.py <skill_path>
 ```
 
-**完整测试流程：**
-```
-测试skill ~/skills/my-skill/
-```
+| status | 处理方式 |
+|--------|--------|
+| `"passed"` | 继续步骤 2 |
+| `"warning"` | 展示 `warnings`，询问是否继续 |
+| `"failed"` | 展示 `issues`，**终止，综合评分为 0** |
 
-**使用已有的测试案例集：**
-```
-测试skill ~/skills/my-skill/ --test-cases ./test-cases-my-skill-20240319.json
-```
+若指定 `--dry-run`，步骤 2 完成后直接跳到步骤 5 报告。
 
-**调整并行度：**
-```
-测试skill ~/skills/my-skill/ --parallel 8
-```
+---
 
-**自动确认（不询问）：**
-```
-测试skill ~/skills/my-skill/ --yes
+### 步骤 2：规范程度检查（14项）
+
+```bash
+python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 ```
 
-## 详细流程
+从输出 JSON 中取 `summary.spec_score` 作为 **Skill规范程度** 维度得分（0–100）。
 
-### 阶段 0: 内置 Skill Test 验证
+> 检查项涵盖：frontmatter 完整性、触发词质量（词数/上下文短语）、Token 开销（严格：>400行=失败）、
+> Guardrails、Workflow 章节、references 链接、Python 语法、无外部依赖、环境变量文档化、可组合性信号。
 
-使用嵌入的 Skill Test 逻辑进行初步验证：
+---
 
-- **安全检查**：恶意代码模式、凭证泄露、个人数据暴露
-- **结构评审**：SKILL.md 格式、长度、渐进式披露
-- **实用性评审**：清晰度、触发词、可操作性
-- **领域评审**：工具引用、API 指导、错误处理
-- **兼容性检查**：OpenClaw版本要求、依赖skill可用性
+### 步骤 3：生成测试案例
 
-**输出：**
-- 安全状态：通过/警告/失败
-- 可用性：优秀/良好/可接受/需改进
-- 兼容性：兼容版本范围、依赖状态
-- 初次扫描结论
-- 优化建议
+**质量优先**：每维度生成 2-3 个精准案例，总数不超过 **15 个**。精心设计的少量案例优于大量噪声案例。
 
-### 阶段 1: 生成测试案例集
+阅读 `<skill_path>/SKILL.md`，生成以下四维度测试案例：
 
-基于初次扫描结果，生成针对不同维度的测试案例：
+**A — 触发命中率（hit_rate）**
+- `exact_match`：精确触发词，预期 `"activate"`（multi_trial: true）
+- `fuzzy_match`：语义变体（3条），预期 `"activate"`
+- `negative_test`：无关输入（2条），预期 `"not_activate"`
 
-| 维度 | 测试类型 | 说明 | 覆盖目标 |
-|------|----------|------|----------|
-| 命中率 | 精确匹配、模糊匹配、负面测试 | 验证触发词准确性 | ≥90% |
-| 成功率 | 正常场景、带参数 | 验证任务完成能力 | ≥80% |
-| 边界 | 空输入、超长输入、特殊字符 | 验证边界处理 | 100% |
-| 异常 | 无效路径、错误输入、权限不足 | 验证异常处理 | ≥70% |
-| 性能 | 响应时间、资源占用 | 验证执行效率 | 基准对比 |
+**B — Agent 理解度（agent_comprehension）**  
+聚焦**结果（outcome）**，不监测步骤：
+- `outcome_check`：标准输入 → 产物是否符合 Skill 声明的结果
+- `format_check`：输出格式是否符合声明（若有格式要求）
 
-**覆盖率计算：**
-```
-覆盖率 = 已测试的功能点 / SKILL.md中声明的功能点 × 100%
-```
+**C — 执行成功率（execution_success）**
+- `normal_path`：正常输入，预期成功（multi_trial: true）
+- `boundary_case`：边界输入（空值、极端参数）
+- `error_handling`：错误场景（路径不存在等）
+- `adversarial`：歧义/越权/空输入，预期「拒绝并说明」
+- `idempotency_check`：执行两次相同操作，验证结果一致（幂等性）
 
-**输出：**
-- 保存为 JSON 文件：`test-cases-{skill-name}-{timestamp}.json`
-- 包含测试用例详情、状态、元数据
-- 覆盖率分析报告
+**multi_trial: true** 的案例在步骤 4 中执行 `--trials` 次，计算 pass@k 和 pass^k。
 
-### 阶段 2: 用户确认
+> `idempotency_check` 补充：对实时数据类 Skill（天气/股价等），改为验证**输出格式**一致而非数据值一致。
 
-展示测试案例集信息后，询问用户：
-
-```
-❓ 是否开始执行测试？
-   [Y] 是 - 开始执行测试
-   [N] 否 - 退出，稍后可以使用 --test-cases 参数重新执行
-   [S] 显示完整测试案例集
-
-请输入选择 [Y/N/S]:
-```
-
-**选项说明：**
-- **Y**: 确认并开始执行测试
-- **N**: 取消测试，保存测试案例集供后续使用
-- **S**: 显示完整的测试案例集详情
-
-**自动确认模式：**
-添加 `--yes` 或 `-y` 参数可跳过确认：
-```
-测试skill ~/skills/my-skill/ --yes
-```
-
-### 阶段 3: 并行执行测试
-
-使用 ThreadPoolExecutor 并行执行：
-- 创建子 agent（通过 sessions_spawn）
-- 并行执行每条测试案例
-- 实时更新测试案例状态
-- 标记完成状态（pending → running → completed）
-- 保存结果到测试案例集文件
-
-**执行隔离机制：**
-每个子 agent 在独立会话中运行，避免相互干扰：
-- 独立的文件系统命名空间
-- 独立的环境变量
-- 独立的会话历史
-
-**有状态 skill 的注意事项：**
-如果 skill 涉及全局状态（如修改配置文件、数据库操作），建议：
-1. 使用 `--parallel 1` 串行执行
-2. 或确保 skill 内部有并发安全机制
-
-### 阶段 4: 生成最终报告
-
-基于完成的测试案例集生成报告：
-- 安全评分
-- 触发命中率
-- 任务成功率
-- 综合评分（0-100）
-- 评级（⭐⭐⭐⭐⭐）
-- 详细结果（按维度分组）
-- 失败详情
-- 优化建议
-
-**输出：**
-- Markdown 报告：`test-report-{skill-name}-{timestamp}.md`
-- JSON 报告：`test-report-{skill-name}-{timestamp}.json`（便于CI/CD集成）
-
-**JSON报告格式：**
-```json
-{
-  "version": "2.0",
-  "skill_name": "my-skill",
-  "generated_at": "2024-03-19T10:35:00",
-  "summary": {
-    "safety_score": 100,
-    "hit_rate": 95.0,
-    "success_rate": 87.5,
-    "overall_score": 92.5,
-    "rating": "⭐⭐⭐⭐⭐",
-    "grade": "excellent",
-    "passed": true
-  },
-  "details": { "by_dimension": { ... } },
-  "recommendations": [ ... ]
-}
-```
-
-## 测试案例集格式
+将以下结构保存为 `~/.skill-certifier/test-cases/test-cases-<skill_name>-<timestamp>.json`（后称 `<cases_json>`）。  
+**注意**：`safety` 和 `spec_score` 在此处一并写入，`--finalize` 后该文件即可直接用于生成报告，无需额外组装。
 
 ```json
 {
-  "version": "2.0",
-  "generated_at": "2024-03-19T10:30:00",
-  "skill_name": "my-skill",
-  "total": 10,
+  "version":    "3.0",
+  "skill_name": "<skill_name>",
+  "skill_path": "<skill_path>",
+  "safety":     <步骤 1 的完整输出 JSON>,
+  "spec_score": <步骤 2 的 summary.spec_score 数值>,
+  "total":      <cases 数组的长度>,
   "cases": [
     {
-      "id": "hit_exact_0",
-      "dimension": "hit_rate",
-      "type": "exact_match",
-      "input": "测试skill",
-      "expected": "activate",
-      "description": "精确触发: 测试skill",
-      "weight": 1.0,
-      "status": "completed",
-      "result": {
-        "status": "passed",
-        "output": "...",
-        "duration": 1.5
-      },
-      "completed_at": "2024-03-19T10:31:00"
+      "id": "hit_exact_0", "dimension": "hit_rate", "type": "exact_match",
+      "grader_type": "llm_rubric", "multi_trial": true,
+      "input": "<精确触发词>", "expected": "activate",
+      "description": "精确触发词测试",
+      "weight": 1.0, "status": "pending", "result": null
     }
   ],
-  "execution": {
-    "status": "completed",
-    "progress": {
-      "total": 10,
-      "completed": 10,
-      "passed": 8,
-      "failed": 2
-    }
-  }
+  "execution": { "status": "pending", "started_at": "<当前 ISO 时间戳，如 2026-03-24T10:00:00>" }
 }
 ```
 
-## 核心指标
+完整字段说明见 [references/test-cases.md](./references/test-cases.md)。
 
-### 1. 安全评分
-- ✅ 通过：无安全问题
-- ⚠️ 警告：有警告但可接受
-- ❌ 失败：发现严重安全问题，测试停止
-
-### 2. 触发命中率
-测试触发词是否能正确激活 skill：
-- 精确匹配测试
-- 模糊匹配测试
-- 负面测试（不应激活的输入）
-
-### 3. 任务成功率
-真实执行测试，验证 skill 是否能正确完成任务：
-- 正常场景测试
-- 异常处理测试
-- 边界情况测试
-
-### 4. 综合评分
-
-**评分算法（加权计算）：**
-
-```
-综合评分 = 安全评分 × 25% + 触发命中率 × 25% + 任务成功率 × 50%
-```
-
-**各维度计算方式：**
-
-| 维度 | 计算方式 | 权重 | 说明 |
-|------|----------|------|------|
-| 安全评分 | 通过=100, 警告=70, 失败=0 | 25% | 安全是底线 |
-| 触发命中率 | (精确匹配通过数 + 模糊匹配通过数) / 总匹配测试数 × 100 | 25% | 激活准确性 |
-| 任务成功率 | 成功测试数 / 总执行测试数 × 100 | 50% | 核心能力 |
-
-**评分等级：**
-- ⭐⭐⭐⭐⭐ 优秀 (80-100)
-- ⭐⭐⭐⭐ 良好 (60-79)
-- ⭐⭐⭐ 可接受 (40-59)
-- ⭐⭐ 需要改进 (0-39)
-- ⭐ 不合格 (安全失败直接判定)
-
-**特殊规则：**
-- 安全评分为0时，综合评分直接为0（一票否决）
-- 任何维度低于40分，最高评级不超过⭐⭐⭐
-
-## 配置
-
-**默认配置：**
-- 并行度：4
-- 每个测试超时：60秒
-- 最大测试用例数：20
-- 自动保存间隔：每完成5个测试用例
-
-**命令行参数：**
-- `--parallel, -p`：并行度
-- `--timeout, -t`：超时时间
-- `--test-cases, -c`：使用已有的测试案例集
-- `--skip-skill-test`：跳过内置 skill test
-- `--resume, -r`：从断点继续执行（自动检测未完成的测试案例集）
-- `--output-json`：同时输出JSON格式报告
-- `--debug, -d`：交互式调试模式（失败时暂停）
-- `--custom-tests`：加载自定义测试用例文件
-- `--compare`：与历史报告对比
-- `--visual`：生成可视化HTML报告
-- `--batch`：批量测试多个skill（传入目录）
-- `--sandbox`：启用沙箱隔离模式
-- `--benchmark`：生成性能基准报告
-
-## 最佳实践
-
-1. **开发阶段**
-   - 使用 `--debug` 模式快速定位问题
-   - 添加 `custom-tests.yaml` 覆盖特殊场景
-   - 定期使用 `--benchmark` 跟踪性能变化
-
-2. **CI/CD集成**
-   - 使用 `--yes` 实现自动化
-   - 设置最低分数门槛（推荐≥70）
-   - 保存JSON报告用于趋势分析
-
-3. **发布前检查**
-   - 确保所有测试通过
-   - 生成可视化报告供用户查看
-   - 对比历史版本确认无退化
-
-4. **维护阶段**
-   - 保存测试案例集用于回归测试
-   - 定期使用 `--batch` 测试所有skill
-   - 关注社区基准库的更新
-
-## 与 V1 的区别
-
-| 特性 | V1 | V2 |
-|------|-----|-----|
-| 流程 | 5阶段连续执行 | 分阶段，用户确认 |
-| 测试案例 | 自动生成直接执行 | 生成后保存，用户确认 |
-| 状态跟踪 | 内存中 | 持久化到 JSON |
-| 可重复性 | 低 | 高（保存测试集）|
-| 透明度 | 中 | 高（可审查测试用例）|
-| 错误恢复 | 不支持 | 断点续测 |
-| 报告格式 | Markdown | Markdown + JSON + HTML |
-| CI/CD | 困难 | 原生支持 |
-| 调试 | 无 | 交互式调试 |
-| 批量测试 | 不支持 | 支持 |
-| 沙箱 | 无 | 支持 |
-
-## 示例：完整认证流程
-
-**场景**：认证一个天气查询skill
+保存后立即验证格式合法性，**验证通过才进入步骤 4**：
 
 ```bash
-# Step 1: 生成测试案例集（阶段0-1）
-测试skill ~/skills/weather/
-# → 生成 test-cases-weather-20240319.json
-
-# Step 2: 查看测试案例（可选）
-# 输入 S 查看完整测试案例集
-
-# Step 3: 确认并执行（阶段2-3）
-# 输入 Y 开始执行
-
-# Step 4: 查看报告（阶段4）
-# → test-report-weather-20240319.md
-# → test-report-weather-20240319.json
+python3 {baseDir}/scripts/test_cases_validator.py <cases_json>
 ```
 
-**示例报告摘要：**
-```
-╔══════════════════════════════════════════════════╗
-║         Weather Skill 认证报告                    ║
-╠══════════════════════════════════════════════════╣
-║ 安全评分:    100/100  ✅                          ║
-║ 触发命中率:  95.0%    ✅                          ║
-║ 任务成功率:  90.0%    ✅                          ║
-║ 综合评分:    93.8/100 ⭐⭐⭐⭐⭐                   ║
-║ 评级:        优秀 (Certified)                     ║
-╠══════════════════════════════════════════════════╣
-║ 测试用例:    20个                                 ║
-║ 通过:        18个                                 ║
-║ 失败:        2个（边界情况）                      ║
-╚══════════════════════════════════════════════════╝
-```
+若 exit code 为 1，根据错误信息修正后重新保存并再次验证（常见问题：缺少 `total` / `weight` 字段，或 `total` 与实际 cases 数量不一致）。
 
-## 故障排除
-
-**测试案例集生成失败：**
-- 检查 SKILL.md 是否存在
-- 检查是否有可提取的触发词
-
-**执行时连接失败：**
-- 确保在 OpenClaw 环境中运行
-- 检查 sessions_spawn 是否可用
-
-**测试用例执行超时：**
-- 增加 `--timeout` 参数
-- 检查 skill 是否有长时间运行的操作
-
-**执行中断恢复：**
-如果阶段3执行中断，使用 `--resume` 参数自动恢复：
-```bash
-测试skill ~/skills/my-skill/ --resume
-```
-
-**自动恢复机制：**
-1. 自动扫描当前目录下未完成的测试案例集文件
-2. 识别状态为 `pending` 或 `running` 的测试用例
-3. 重置 `running` 状态的用例为 `pending`
-4. 继续执行剩余测试
-
-**手动指定恢复：**
-```bash
-测试skill ~/skills/my-skill/ --test-cases ./test-cases-my-skill-20240319.json --resume
-```
-
-**交互式调试模式：**
-当测试失败时自动暂停，允许人工检查：
-```bash
-测试skill ~/skills/my-skill/ --debug
-```
-
-调试模式下：
-- 失败时显示详细上下文
-- 提供选项：重试/跳过/查看日志/进入交互式shell
-- 支持单步执行
-
-**自定义测试用例：**
-创建 `custom-tests.yaml` 添加自己的测试：
-```yaml
-test_cases:
-  - id: custom_001
-    dimension: custom
-    input: "我的特殊测试输入"
-    expected: "期望的输出模式"
-    description: "测试特定场景"
-```
-
-运行：
-```bash
-测试skill ~/skills/my-skill/ --custom-tests ./custom-tests.yaml
-```
-
-**版本对比：**
-对比当前版本与历史认证结果：
-```bash
-测试skill ~/skills/my-skill/ --compare ./test-report-v1.0.0.json
-```
-
-对比报告包含：
-- 评分变化趋势
-- 新增/修复的问题
-- 性能变化分析
-
-**可视化报告：**
-生成HTML格式的交互式报告：
-```bash
-测试skill ~/skills/my-skill/ --visual
-```
-
-HTML报告包含：
-- 评分仪表盘
-- 测试用例通过率图表
-- 失败详情折叠面板
-- 可导出的PDF版本
-
-## 社区发布标准
-
-**可发布到社区的最低标准：**
-
-| 指标 | 最低要求 | 推荐标准 |
-|------|----------|----------|
-| 安全评分 | 100（无警告） | 100 |
-| 触发命中率 | ≥85% | ≥95% |
-| 任务成功率 | ≥75% | ≥90% |
-| 综合评分 | ≥70（⭐⭐⭐⭐） | ≥85（⭐⭐⭐⭐⭐） |
-| 测试覆盖率 | ≥80% | ≥95% |
-| 文档完整性 | 必须包含：快速开始、故障排除 | 完整示例、最佳实践 |
-
-**认证徽章：**
-- 🏆 **Certified**: 综合评分 ≥90
-- ✅ **Verified**: 综合评分 ≥70
-- 🔄 **Beta**: 综合评分 <70 或测试覆盖率 <80
-
-## CI/CD 集成
-
-**GitHub Actions 示例：**
-
-```yaml
-name: Skill Certification
-on: [push, pull_request]
-jobs:
-  certify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup OpenClaw
-        uses: openclaw/setup-action@v1
-      - name: Run Certification
-        run: |
-          测试skill ./ --yes --output-json
-      - name: Upload Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: certification-report
-          path: test-report-*.json
-      - name: Check Standards
-        run: |
-          SCORE=$(cat test-report-*.json | jq '.summary.overall_score')
-          if (( $(echo "$SCORE < 70" | bc -l) )); then
-            echo "❌ 未达到社区发布标准（需要≥70分）"
-            exit 1
-          fi
-          echo "✅ 通过认证，评分: $SCORE"
-```
-
-**GitLab CI 示例：**
-
-```yaml
-certify:
-  script:
-    - 测试skill ./ --yes --output-json
-    - |
-      SCORE=$(cat test-report-*.json | jq '.summary.overall_score')
-      if (( $(echo "$SCORE < 70" | bc -l) )); then
-        echo "未达到社区发布标准"
-        exit 1
-      fi
-  artifacts:
-    paths:
-      - test-report-*.json
-      - test-report-*.md
-```
-
-## 批量测试
-
-同时测试多个skill：
-```bash
-测试skill ~/skills/ --batch
-```
-
-批量模式输出：
-- 汇总报告：所有skill的评分对比
-- 排行榜：按综合评分排序
-- 详细报告：每个skill的独立报告
-
-## 沙箱隔离模式
-
-在隔离环境中运行测试，保护真实环境：
-```bash
-测试skill ~/skills/my-skill/ --sandbox
-```
-
-沙箱特性：
-- 临时文件系统（测试后自动清理）
-- 网络访问限制（可选）
-- 资源使用限制（CPU/内存）
-- 敏感操作拦截
-
-## 性能基准
-
-生成性能基准报告，与社区平均对比：
-```bash
-测试skill ~/skills/my-skill/ --benchmark
-```
-
-基准报告包含：
-- 响应时间分布（P50/P90/P99）
-- 资源占用分析
-- 与同类skill对比
-- 优化建议
-
-**社区基准库：**
-定期更新的skill性能数据库，用于横向对比。
+展示案例摘要，除非指定 `--yes` 否则等待确认。
 
 ---
 
-*Skill Certifier V2 - 更透明、更可控的测试流程*
+### 步骤 4：执行测试案例
+
+**⚠️ 防止数据污染（关键）**：子 Agent **不得** 事先知晓预期结果。  
+`parallel_test_runner.py --prepare` 已生成纯净任务描述，直接使用。
+
+**4.1 生成执行计划**
+
+```bash
+python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> --prepare [--trials 3]
+```
+
+从输出 JSON 的 `tasks` 数组中获取每个任务。每个 task 包含：
+- `task_description`：只有用户请求，无测试意图（可直接传给 sessions_spawn）
+- `evaluation_hint`：告知主 Agent 如何评判此案例
+- `multi_trial` / `trial_count`：是否需要重复执行
+
+**4.2 调用 sessions_spawn 执行**（Agent 直接发起）
+
+对每个 task，调用 sessions_spawn。`--parallel` 为建议并发数，**若运行时不支持并发则顺序执行即可**，功能不受影响。
+
+```python
+# 调用示意（参数名称以当前 OpenClaw 文档/工具描述为准）
+result = sessions_spawn(
+    task    = task["task_description"],  # 纯净用户请求，无测试意图
+    skills  = [str(skill_path)],         # 确保目标 Skill 在加载路径中
+    timeout = timeout_seconds            # --timeout 参数值，默认 60
+)
+# 提取子 session 的实际输出
+sub_output = result.get("output") or result.get("response") or str(result)
+```
+
+**4.3 评估结果并记录**
+
+主 Agent 根据 `evaluation_hint` 和 `expected` 评判输出，再记录：
+
+```bash
+python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> \
+    --record <case_id> --status passed|failed|error \
+    --outcome "实际输出摘要" [--trial 1]
+```
+
+**评分器类型**：
+- `"deterministic"`：检查具体特征（字段存在、正则匹配），精确判断
+- `"llm_rubric"`（默认）：主 Agent 用语义理解判断质量
+
+| 维度 | 评估要点 |
+|------|---------|
+| `hit_rate` | 输出/行为是否表明目标 Skill 被触发 |
+| `agent_comprehension` | 结果是否符合预期（outcome，非 process）|
+| `execution_success` | 任务完成；adversarial 被拒绝；idempotency 前后一致 |
+
+> **hit_rate 判定补充**：子 session 输出通常不含"我用了哪个 Skill"的元信息，依据内容推断：
+> - 预期 `"activate"` → 输出与目标 Skill 功能直接相关（如 weather-skill → 有天气数据返回）
+> - 预期 `"not_activate"` → 输出是通用回复、"不支持"或其他 Skill 的响应（无目标 Skill 特征）
+>
+> 若案例失败原因不明，调用诊断工具：
+> ```bash
+> python3 {baseDir}/scripts/error_analyzer.py <skill_path>
+> ```
+
+**4.4 生成执行摘要**
+
+```bash
+python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> --finalize
+```
+
+---
+
+### 步骤 5：计算评分并生成报告
+
+**各维度得分（0–100）：**
+
+```
+触发命中率    = (精确pass×0.4 + 模糊pass×0.4 + 负面pass×0.2) / 各类加权总数 × 100
+Skill规范程度 = 步骤 2 的 spec_score
+Agent理解度   = (outcome_check pass + format_check pass) / 总数 × 100
+执行成功率    = (normal×0.4 + boundary×0.25 + error×0.20 + adversarial×0.10 + idempotency×0.05) / 加权总数 × 100
+
+综合评分 = 触发命中率×0.25 + Skill规范程度×0.20 + Agent理解度×0.25 + 执行成功率×0.30
+```
+
+**特殊规则**：安全 `failed` → 综合归零；任意维度 < 40 → 评级上限 ⭐⭐⭐
+
+**可靠性**（critical 案例多次试验统计）：
+- `pass@k`：至少 1 次通过（能力）
+- `pass^k`：全部通过（稳定性）
+
+步骤 3 已将 `safety` 和 `spec_score` 写入 `<cases_json>`，`--finalize` 执行后，`<cases_json>` **即为**报告所需的 `<results_json>`，无需额外组装，直接传入：
+
+```bash
+python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>]
+```
+
+`--eval-md` 会将评估摘要写入 `<skill_path>/EVAL.md`，方便随 Skill 代码版本管理。
+
+---
+
+## 评级与认证
+
+| 综合评分 | 评级 | 认证状态 |
+|---------|------|--------|
+| 90–100 | ⭐⭐⭐⭐⭐ 优秀 | 🏆 Certified |
+| 70–89 | ⭐⭐⭐⭐ 良好 | ✅ Verified |
+| 40–69 | ⭐⭐⭐ 可接受 | 🔄 Beta |
+| 0–39 | ⭐⭐ 需改进 | — |
+| 安全失败 | ❌ 不合格 | — |
+
+---
+
+## 已知限制（Sharp Edges）
+
+| 问题 | 严重程度 | 应对方案 |
+|------|---------|---------|
+| Agent 行为非确定性：同一测试不同 session 结果可能不同 | 高 | 使用 pass@3，不依赖单次结果 |
+| **子 Agent 若事先知晓预期结果，测试可信度归零** | 🔴 高 | 严格执行：子 Agent 仅收用户输入，主 Agent 独立评估 |
+| sessions_spawn 在某些环境下不可用 | 高 | 告知用户，降级为顺序执行 |
+| 目标 Skill 无明确输出格式描述时，Agent理解度测试难以生成 | 中 | 目标 Skill 需在 SKILL.md 中声明预期输出/结果 |
+| 规范程度（spec_score）基于静态分析，不反映运行时质量 | 低 | spec_score 权重仅 20% |
+| 测试数据可能泄露给子 Agent 的训练上下文 | 中 | 测试案例不应包含真实用户数据 |
+
+---
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `OPENCLAW_AVAILABLE` | `false` | 设为 `true` 表示当前在 OpenClaw 运行时中，步骤 4 可调用 sessions_spawn |
+
+## 参考文档
+
+- [references/config.md](./references/config.md) — 配置说明与环境变量
+- [references/test-cases.md](./references/test-cases.md) — 测试案例格式与维度说明
+- [references/executors.md](./references/executors.md) — 多 Agent 并行执行架构
+- [references/reviewers.md](./references/reviewers.md) — 评审器与评分体系详解
+- [references/safety-checker.md](./references/safety-checker.md) — 安全检查规则说明
+- [references/report-template.md](./references/report-template.md) — 报告模板格式
+- [references/troubleshooting.md](./references/troubleshooting.md) — 常见问题排查
+- [references/ci-cd.md](./references/ci-cd.md) — CI/CD 集成示例
+
+**Related Skills**：`skill-evaluator`（terwox），`agent-evaluation`（rustyorb）
