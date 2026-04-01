@@ -105,3 +105,54 @@ python3 parallel_test_runner.py <cases_json> --finalize
 | 快速验证 | `--timeout 60` |
 | 标准测试 | `--timeout 120`（默认） |
 | 有状态 Skill | 串行执行（按顺序逐个测试） |
+
+## 分阶段执行（依赖 Skill）
+
+对有外部依赖的 Skill，测试流程分三个阶段执行：Phase A（无依赖测试）→ Phase B（依赖配置门控）→ Phase C（有依赖测试）。
+
+### 查看阶段状态
+
+```bash
+python3 parallel_test_runner.py <cases_json> --phase-status
+```
+
+### 按阶段获取任务
+
+```bash
+python3 parallel_test_runner.py <cases_json> --prepare --phase phase_a
+python3 parallel_test_runner.py <cases_json> --prepare --phase phase_c
+```
+
+### 推进阶段
+
+```bash
+python3 parallel_test_runner.py <cases_json> --advance-phase
+```
+
+### 验证依赖
+
+```bash
+python3 parallel_test_runner.py <cases_json> --verify-dep ak
+python3 parallel_test_runner.py <cases_json> --verify-all-deps
+```
+
+### 典型流程
+
+```bash
+# Phase A
+python3 ptr.py cases.json --prepare --phase phase_a
+# ... Agent 执行 + record ...
+python3 ptr.py cases.json --advance-phase
+
+# Phase B
+python3 ptr.py cases.json --verify-all-deps
+# ... 用户配置依赖 ...
+python3 ptr.py cases.json --verify-dep ak
+python3 ptr.py cases.json --advance-phase
+
+# Phase C
+python3 ptr.py cases.json --prepare --phase phase_c
+# ... Agent 执行 + record ...
+python3 ptr.py cases.json --advance-phase
+python3 ptr.py cases.json --finalize
+```

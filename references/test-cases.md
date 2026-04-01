@@ -14,7 +14,7 @@ python3 scripts/smart_test_generator.py <skill_path> --skeleton
 
 ## 4 个测试维度
 
-### 维度 1：触发命中率（hit_rate）
+### 维度 1：触发命中率（hit_rate）　→ 默认 phase_a
 
 验证 Skill 的触发词是否能正确激活/不激活。
 
@@ -86,7 +86,7 @@ python3 scripts/spec_checker.py <skill_path> --json
 
 ---
 
-### 维度 3：Agent理解度（agent_comprehension）
+### 维度 3：Agent理解度（agent_comprehension）　→ 默认 phase_c
 
 验证 Agent 对目标 Skill 的理解——**聚焦最终结果（outcome），不评估执行过程**。
 
@@ -125,17 +125,17 @@ python3 scripts/spec_checker.py <skill_path> --json
 
 ---
 
-### 维度 4：执行成功率（execution_success）
+### 维度 4：执行成功率（execution_success）　→ 按类型分 phase
 
 真实执行多种场景，验证 Skill 能否成功完成任务。
 
-| 测试类型 | 说明 | 权重 | 通过目标 |
-|---------|------|------|--------|
-| `normal_path` | 标准输入，Skill 应完整执行 | 40% | ≥ 90% |
-| `boundary_case` | 边界输入（空路径、超长输入等） | 25% | ≥ 70% |
-| `error_handling` | 异常输入（无效路径、权限不足等） | 20% | ≥ 60% |
-| `adversarial` | 歧义/越权/空输入，预期拒绝并说明 | 10% | ≥ 60% |
-| `idempotency_check` | 执行两次相同操作，验证结果一致 | 5% | ≥ 80% |
+| 测试类型 | 说明 | 权重 | 通过目标 | 默认 Phase |
+|---------|------|------|--------|-----------|
+| `normal_path` | 标准输入，Skill 应完整执行 | 40% | ≥ 90% | phase_c |
+| `boundary_case` | 边界输入（空路径、超长输入等） | 25% | ≥ 70% | phase_a |
+| `error_handling` | 异常输入（无效路径、权限不足等） | 20% | ≥ 60% | 视具体场景 |
+| `adversarial` | 歧义/越权/空输入，预期拒绝并说明 | 10% | ≥ 60% | phase_a |
+| `idempotency_check` | 执行两次相同操作，验证结果一致 | 5% | ≥ 80% | phase_c |
 
 > `idempotency_check` 补充：对实时数据类 Skill（天气/股价等），改为验证**输出格式**一致而非数据值一致。
 
@@ -180,6 +180,27 @@ python3 scripts/spec_checker.py <skill_path> --json
   "skill_path": "~/skills/my-skill/",
   "generated_at": "2026-03-23T10:00:00",
   "total": 30,
+  "dependencies": {
+    "items": [
+      {
+        "id": "ak",
+        "name": "API_KEY",
+        "type": "env_var",
+        "description": "API Access Key",
+        "configure_hint": "export API_KEY=xxx",
+        "verify_command": "echo $API_KEY",
+        "verify_expect": "xxx",
+        "status": "unverified"
+      }
+    ],
+    "all_verified": false
+  },
+  "phases": {
+    "current": "phase_a",
+    "phase_a": {"status": "pending", "description": "无依赖测试"},
+    "phase_b": {"status": "blocked", "description": "依赖配置门控", "blocked_by": "phase_a"},
+    "phase_c": {"status": "blocked", "description": "有依赖测试", "blocked_by": "phase_b"}
+  },
   "cases": [
     {
       "id": "hit_exact_0",
@@ -191,6 +212,22 @@ python3 scripts/spec_checker.py <skill_path> --json
       "model": "auto",
       "weight": 1.0,
       "status": "pending",
+      "phase": "phase_a",
+      "dependency_requires": [],
+      "result": null,
+      "completed_at": null
+    },
+    {
+      "id": "exec_normal_0",
+      "dimension": "execution_success",
+      "type": "normal_path",
+      "input": "使用 my-skill 执行标准操作",
+      "expected": "任务完成且输出符合预期",
+      "description": "标准输入执行路径",
+      "weight": 1.1,
+      "status": "pending",
+      "phase": "phase_c",
+      "dependency_requires": ["ak"],
       "result": null,
       "completed_at": null
     }

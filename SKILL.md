@@ -46,12 +46,32 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 ```
 取 `summary.spec_score` 作为 Skill规范程度得分。`--dry-run` 时跳到步骤 5。
 
-## 步骤 2.5：构造执行环境
+## 步骤 2.5：依赖分析与环境准备
 
 **2.5.1 确认 Skill 已安装**（必须）：检查目标 Skill 是否出现在当前 `available_skills` 中。若不在，**停止测试**并告知用户：
 > ⚠️ 目标 Skill `{name}` 未被 OpenClaw 发现。请先安装到 `~/.openclaw/skills/` 或 `<workspace>/skills/`，然后重新开始测试。
 
-**2.5.2 补齐运行依赖**：若 `sandbox_incompatible`，基于 `setup_checklist` 逐项引导用户补齐依赖（环境变量、网络、浏览器等）。所有依赖就绪后才进入步骤 3。`sandbox_compatible` 时跳过。
+**2.5.2 依赖项分析**（`sandbox_incompatible` 时）：阅读目标 SKILL.md + `sandbox_checker` 输出，提取结构化依赖清单，填入案例 JSON 的 `dependencies.items`：
+```json
+{
+  "id": "ak",
+  "name": "ALI_1688_AK",
+  "type": "env_var",
+  "description": "1688 API Access Key，用于调用所有业务接口",
+  "configure_hint": "执行 cli.py configure YOUR_AK 或 export ALI_1688_AK=xxx",
+  "verify_command": "python3 {baseDir}/cli.py check",
+  "verify_expect": "configured",
+  "status": "unverified"
+}
+```
+每个依赖须有 `verify_command`（可执行的验证命令）和 `verify_expect`（输出中应包含的关键词）。
+
+**2.5.3 向用户展示依赖状态**：列出所有依赖及其当前状态，告知用户：
+- 测试将分两阶段：先测无依赖场景（Phase A），再测有依赖场景（Phase C）
+- Phase C 执行前需要配置依赖项
+- 用户可以选择现在配置、稍后配置、或跳过 Phase C
+
+`sandbox_compatible` 时跳过 2.5.2 和 2.5.3。
 
 ## 步骤 3：生成测试案例
 
@@ -74,14 +94,32 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ## 步骤 4：执行测试案例
 
-按 [references/executors.md](./references/executors.md) 执行：
+执行流程由案例 JSON 中的 `phases` 状态机驱动。Agent 每次操作后通过 CLI 更新 JSON，确保可断点续跑。
 
-1. `--prepare` 生成执行计划（自动跳过已完成，支持断点续跑）
-2. 对每个 task 调用 `sessions_spawn`，**`runTimeoutSeconds` 必须 ≥ 120**（默认值，勿手动缩短）
-3. **评估**：对比子 Agent 输出与案例 `expected`，参考 `evaluation_hint` 判断 passed/failed
-4. `--record` 记录结果（支持 `--outcome-file` 传长文本）
-5. **早期终止**：连续 3 个同因失败 → 停止，报告根因
-6. `--finalize` 汇总
+### Phase A：无依赖测试
+
+1. `--prepare --phase phase_a` 获取任务列表
+2. 逐个执行 + `--record` 记录
+3. 全部完成后 `--advance-phase` 推进状态
+
+### Phase B：依赖配置门控
+
+1. `--phase-status` 确认进入 Phase B
+2. `--verify-all-deps` 检查依赖状态
+3. 未通过的依赖 → 向用户展示 `configure_hint`，等待用户配置
+4. 用户配置后 → `--verify-dep <id>` 逐项验证
+5. 全部通过 → `--advance-phase` 进入 Phase C
+6. 用户选择跳过 → Phase C 案例标记为 `skipped`，直接进入步骤 5
+
+### Phase C：有依赖测试
+
+1. `--prepare --phase phase_c` 获取任务列表
+2. 逐个执行 + `--record` 记录
+3. 全部完成后 `--advance-phase` 完成所有阶段
+
+**早期终止**：任意 phase 中连续 3 个同因失败 → 停止当前 phase，报告根因。
+
+按 [references/executors.md](./references/executors.md) 了解详细命令用法。
 
 ## 步骤 5：生成报告
 

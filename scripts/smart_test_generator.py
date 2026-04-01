@@ -33,8 +33,18 @@ FILL_INSTRUCTIONS = (
     '- execution_success: input 应是具体业务场景的自然语言请求\n'
     '- adversarial: input 应是尝试突破 Skill 边界的请求（越权、注入、异常格式）\n'
     '- idempotency_check: input 应与 exec_normal_0 相同\n'
-    'hints 中的 trigger_phrases_detected / commands_detected / output_format_detected 是脚本提取的线索，仅供参考。'
+    'hints 中的 trigger_phrases_detected / commands_detected / output_format_detected 是脚本提取的线索，仅供参考。\n\n'
+    '对于有依赖的 Skill（sandbox_incompatible），Agent 需要：\n'
+    '1. 在 dependencies.items 中填充具体依赖项（id, name, type, description, configure_hint, verify_command, verify_expect, status="unverified"）\n'
+    '2. 为 phase_c 案例填充 expected（假设依赖已就绪时的预期结果）\n'
+    '3. 为 phase_a 中的 error_handling 案例，expected 应描述依赖缺失时的正确行为（如输出引导话术）'
 )
+
+# 案例 phase 分配规则
+# phase_a（无依赖）：hit_rate 所有类型、adversarial、boundary_case、error_handling（依赖缺失引导）
+# phase_c（有依赖）：normal_path、outcome_check、format_check、idempotency_check
+PHASE_A_TYPES = {'exact_match', 'fuzzy_match', 'negative_test', 'adversarial', 'boundary_case'}
+PHASE_C_TYPES = {'normal_path', 'outcome_check', 'format_check', 'idempotency_check'}
 
 
 class SmartTestGenerator:
@@ -817,6 +827,20 @@ class SmartTestGenerator:
 
             for i in range(count):
                 case_id = f'{prefix}_{i}' if count > 1 else prefix + '_0'
+
+                # 确定 phase 和 dependency_requires
+                if typ in PHASE_C_TYPES:
+                    phase = 'phase_c'
+                    dep_requires = ['__FILL_DEP_ID__']
+                elif typ == 'error_handling':
+                    # error_handling 默认归 phase_a（测试依赖缺失时的引导）
+                    phase = 'phase_a'
+                    dep_requires = []
+                else:
+                    # hit_rate 所有类型、adversarial、boundary_case
+                    phase = 'phase_a'
+                    dep_requires = []
+
                 case = {
                     'id': case_id,
                     'dimension': dim,
@@ -827,6 +851,8 @@ class SmartTestGenerator:
                     'priority': defaults.get('priority', '中'),
                     'weight': defaults.get('weight', 1.0),
                     'status': 'pending',
+                    'phase': phase,
+                    'dependency_requires': dep_requires,
                 }
                 if defaults.get('multi_trial'):
                     case['multi_trial'] = True
@@ -848,6 +874,16 @@ class SmartTestGenerator:
             'skill_name': analysis.get('name', 'unknown'),
             'skill_path': str(self.skill_path),
             'analysis': analysis,
+            'dependencies': {
+                'items': [],
+                'all_verified': False,
+            },
+            'phases': {
+                'current': 'phase_a',
+                'phase_a': {'status': 'pending', 'description': '无依赖测试'},
+                'phase_b': {'status': 'blocked', 'description': '依赖配置门控', 'blocked_by': 'phase_a'},
+                'phase_c': {'status': 'blocked', 'description': '有依赖测试', 'blocked_by': 'phase_b'},
+            },
             'hints': {
                 'trigger_phrases_detected': quality_triggers or trigger_hints[:3],
                 'commands_detected': [{'subcmd': c.get('subcmd', ''), 'description': c.get('description', '')} for c in commands],

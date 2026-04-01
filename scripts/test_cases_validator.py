@@ -37,6 +37,8 @@ class TestCasesValidator:
         Returns:
             (is_valid, error_message)
         """
+        warnings = []
+
         # 检查必需字段
         for field in TestCasesValidator.REQUIRED_FIELDS:
             if field not in test_cases_data:
@@ -54,13 +56,43 @@ class TestCasesValidator:
         
         if len(cases) != test_cases_data.get('total', 0):
             return False, f"cases 数量 ({len(cases)}) 与 total ({test_cases_data.get('total')}) 不匹配"
+
+        # 验证顶层 dependencies 结构（如果存在）
+        if 'dependencies' in test_cases_data:
+            deps = test_cases_data['dependencies']
+            if not isinstance(deps, dict):
+                return False, "dependencies 必须是对象"
+            items = deps.get('items')
+            if not isinstance(items, list):
+                return False, "dependencies.items 必须是数组"
+            for idx, item in enumerate(items):
+                if not isinstance(item, dict):
+                    return False, f"dependencies.items[{idx}] 必须是对象"
+                for req_field in ('id', 'name', 'status'):
+                    if req_field not in item:
+                        return False, f"dependencies.items[{idx}] 缺少字段: {req_field}"
+
+        # 验证顶层 phases 结构（如果存在）
+        if 'phases' in test_cases_data:
+            phases = test_cases_data['phases']
+            if not isinstance(phases, dict):
+                return False, "phases 必须是对象"
+            for req_key in ('current', 'phase_a', 'phase_b', 'phase_c'):
+                if req_key not in phases:
+                    return False, f"phases 缺少字段: {req_key}"
         
         # 检查每个 case
         for i, case in enumerate(cases):
             is_valid, error = TestCasesValidator._validate_case(case, i)
             if not is_valid:
                 return False, error
+            # 验证 phase 和 dependency_requires（向后兼容）
+            w = TestCasesValidator._validate_phase_fields(case, i)
+            if w:
+                warnings.append(w)
         
+        if warnings:
+            return True, "验证通过（警告：" + "; ".join(warnings) + "）"
         return True, "验证通过"
     
     @staticmethod
@@ -97,7 +129,37 @@ class TestCasesValidator:
                 return False, f"第 {index+1} 个测试案例的 result 缺少 status"
         
         return True, ""
-    
+
+    @staticmethod
+    def _validate_phase_fields(case: Dict, index: int) -> str:
+        """
+        验证 phase 和 dependency_requires 字段。
+        向后兼容：缺失时视为 phase_a，返回 warning 字符串（不 fail）。
+        """
+        phase = case.get('phase')
+        dep_req = case.get('dependency_requires')
+
+        # 向后兼容：没有 phase 字段，视为 phase_a
+        if phase is None:
+            return f"第 {index+1} 个案例 [{case.get('id', '?')}] 缺少 phase 字段（兼容旧格式，视为 phase_a）"
+
+        if phase not in ('phase_a', 'phase_c'):
+            return f"第 {index+1} 个案例 [{case.get('id', '?')}] 的 phase 值无效: {phase}（应为 phase_a 或 phase_c）"
+
+        if dep_req is None:
+            return f"第 {index+1} 个案例 [{case.get('id', '?')}] 缺少 dependency_requires 字段（兼容旧格式）"
+
+        if not isinstance(dep_req, list):
+            return f"第 {index+1} 个案例 [{case.get('id', '?')}] 的 dependency_requires 应为数组"
+
+        if phase == 'phase_a' and len(dep_req) > 0:
+            return f"第 {index+1} 个案例 [{case.get('id', '?')}] 的 phase_a 案例 dependency_requires 应为空数组"
+
+        if phase == 'phase_c' and len(dep_req) == 0:
+            return f"第 {index+1} 个案例 [{case.get('id', '?')}] 的 phase_c 案例 dependency_requires 至少需要一个元素"
+
+        return ""
+
     @staticmethod
     def _check_version_compatibility(version: str) -> bool:
         """检查版本兼容性"""

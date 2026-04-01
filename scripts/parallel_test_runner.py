@@ -76,7 +76,8 @@ class TestCoordinator:
     # 步骤 A：生成执行计划
     # ─────────────────────────────────────────────
 
-    def prepare(self, trials: int = 3, dimension: Optional[str] = None) -> Dict[str, Any]:
+    def prepare(self, trials: int = 3, dimension: Optional[str] = None,
+                phase: Optional[str] = None) -> Dict[str, Any]:
         """
         为每个 pending 案例生成纯净的任务描述。
 
@@ -86,13 +87,39 @@ class TestCoordinator:
         Args:
             trials:    multi_trial 案例的重复次数
             dimension: 若指定，只返回该维度的 pending 案例（切片测试）
+            phase:     若指定，只返回该 phase 的 pending 案例（phase_a/phase_b/phase_c）
         """
+        # 确定目标 phase
+        target_phase = phase
+        phases = self.data.get('phases')
+        if phases and not target_phase:
+            target_phase = phases.get('current', 'phase_a')
+
+        # 如果目标 phase 处于 blocked 状态，输出提示并返回空
+        if phases and target_phase and target_phase in phases:
+            phase_info = phases[target_phase]
+            if isinstance(phase_info, dict) and phase_info.get('status') == 'blocked':
+                blocked_by = phase_info.get('blocked_by', '')
+                return {
+                    'cases_file': str(self.cases_file),
+                    'skill_name': self.data.get('skill_name', 'unknown'),
+                    'total_tasks': 0,
+                    'tasks': [],
+                    'note': f'阶段 {target_phase} 当前为 blocked 状态（被 {blocked_by} 阻断），'
+                            f'请先完成前置阶段后调用 --advance-phase 推进。',
+                }
+
         tasks: List[Dict] = []
         for case in self.data.get('cases', []):
             if case.get('status', TestStatus.PENDING) != TestStatus.PENDING:
                 continue  # 跳过已执行或进行中的
             if dimension and case.get('dimension') != dimension:
                 continue  # 切片过滤：只返回指定维度
+            # phase 过滤：只返回目标 phase 的案例
+            if target_phase:
+                case_phase = case.get('phase', 'phase_a')
+                if case_phase != target_phase:
+                    continue
 
             dim   = case.get('dimension', '')
             typ   = case.get('type', '')
@@ -243,6 +270,15 @@ class TestCoordinator:
         failed_n  = len(completed) - passed_n
         pending_n = sum(1 for c in cases if c.get('status') == TestStatus.PENDING)
 
+        # 计算 skipped 案例（处于 blocked phase 中的案例）
+        phases = self.data.get('phases', {})
+        skipped_count = 0
+        for case in cases:
+            case_phase = case.get('phase', 'phase_a')
+            if case_phase in phases and isinstance(phases[case_phase], dict):
+                if phases[case_phase].get('status') == 'blocked':
+                    skipped_count += 1
+
         # Token 汇总统计
         total_tokens_in  = sum((c.get('result') or {}).get('tokens_in', 0) for c in completed)
         total_tokens_out = sum((c.get('result') or {}).get('tokens_out', 0) for c in completed)
@@ -257,6 +293,7 @@ class TestCoordinator:
             'passed':          passed_n,
             'failed':          failed_n,
             'pending':         pending_n,
+            'skipped_count':   skipped_count,
             'completion_rate': round(len(completed) / len(cases) * 100, 1) if cases else 0.0,
             'pass_rate':       round(passed_n / len(completed) * 100, 1) if completed else 0.0,
             'total_tokens_in':     total_tokens_in,
@@ -264,6 +301,14 @@ class TestCoordinator:
             'avg_tokens_per_case': avg_tokens_per_case,
             'finalized_at':    datetime.now().isoformat(),
         }
+
+        # phases 状态
+        if phases:
+            summary['phases'] = phases
+
+        # coverage_note
+        if skipped_count > 0:
+            summary['coverage_note'] = f'部分测试：{skipped_count} 个案例因依赖未就绪被跳过'
 
         # 早期终止检测：最近连续 N 个案例是否因同一根因失败
         early_exit = self._detect_early_exit(completed)
@@ -281,6 +326,171 @@ class TestCoordinator:
 
         self._save()
         return summary
+
+    # ─────────────────────────────────────────────
+    # 分阶段执行：推进 & 依赖验证
+    # ─────────────────────────────────────────────
+
+    def advance_phase(self) -> Dict[str, Any]:
+        """
+        推进到下一个阶段：
+        1. 检查当前 phase 所有案例是否完成
+        2. 完成则标记 completed，检查下一个 phase 前置条件
+        3. 满足则推进，不满足则输出阻断原因
+        """
+        phases = self.data.get('phases')
+        if not phases:
+            return {'advanced': False, 'reason': 'JSON 中没有 phases 结构'}
+
+        current = phases.get('current', 'phase_a')
+        phase_order = ['phase_a', 'phase_b', 'phase_c']
+
+        if current not in phase_order:
+            return {'advanced': False, 'reason': f'未知的当前阶段: {current}'}
+
+        current_idx = phase_order.index(current)
+
+        # 检查当前 phase 的案例是否都已完成（phase_b 没有案例，直接跳过检查）
+        if current != 'phase_b':
+            current_cases = [
+                c for c in self.data.get('cases', [])
+                if c.get('phase', 'phase_a') == current
+            ]
+            pending = [c for c in current_cases if c.get('status', 'pending') == 'pending']
+            if pending:
+                return {
+                    'advanced': False,
+                    'reason': f'{current} 还有 {len(pending)} 个案例未完成',
+                    'pending_ids': [c['id'] for c in pending],
+                }
+
+        # 标记当前 phase 为 completed
+        if current in phases and isinstance(phases[current], dict):
+            phases[current]['status'] = 'completed'
+
+        # 确定下一个 phase
+        if current_idx >= len(phase_order) - 1:
+            phases['current'] = current  # 已是最后一个
+            self._save()
+            return {'advanced': False, 'reason': '所有阶段已完成', 'all_completed': True}
+
+        next_phase = phase_order[current_idx + 1]
+        next_info = phases.get(next_phase, {})
+
+        # 检查前置条件
+        blocked_by = next_info.get('blocked_by', '')
+        if blocked_by:
+            blocker_info = phases.get(blocked_by, {})
+            if isinstance(blocker_info, dict) and blocker_info.get('status') != 'completed':
+                self._save()
+                return {
+                    'advanced': False,
+                    'reason': f'{next_phase} 被 {blocked_by} 阻断（状态: {blocker_info.get("status", "unknown")}）',
+                }
+
+        # phase_c 额外要求：dependencies.all_verified == true
+        if next_phase == 'phase_c':
+            deps = self.data.get('dependencies', {})
+            if not deps.get('all_verified', False):
+                self._save()
+                return {
+                    'advanced': False,
+                    'reason': f'phase_c 要求所有依赖已验证（all_verified=true），当前为 {deps.get("all_verified", False)}',
+                }
+
+        # 推进
+        if isinstance(next_info, dict):
+            next_info['status'] = 'pending'
+        phases['current'] = next_phase
+        self._save()
+        return {'advanced': True, 'from': current, 'to': next_phase}
+
+    def verify_dependency(self, dep_id: str) -> Dict[str, Any]:
+        """
+        验证单个依赖项：
+        1. 从 dependencies.items 中查找
+        2. 执行 verify_command（subprocess，timeout 10s）
+        3. 检查输出是否包含 verify_expect
+        4. 更新 status 并检查 all_verified
+        """
+        import subprocess
+
+        deps = self.data.get('dependencies', {})
+        items = deps.get('items', [])
+
+        target = None
+        for item in items:
+            if item.get('id') == dep_id:
+                target = item
+                break
+
+        if target is None:
+            return {'verified': False, 'error': f'依赖 {dep_id} 未找到'}
+
+        verify_cmd = target.get('verify_command', '')
+        verify_expect = target.get('verify_expect', '')
+
+        if not verify_cmd:
+            return {'verified': False, 'error': f'依赖 {dep_id} 没有 verify_command'}
+
+        try:
+            result = subprocess.run(
+                verify_cmd, shell=True, capture_output=True, text=True, timeout=10
+            )
+            output = result.stdout + result.stderr
+            if verify_expect and verify_expect in output:
+                target['status'] = 'verified'
+            else:
+                target['status'] = 'failed'
+        except subprocess.TimeoutExpired:
+            target['status'] = 'failed'
+            output = 'TIMEOUT'
+        except Exception as e:
+            target['status'] = 'failed'
+            output = str(e)
+
+        # 检查是否所有依赖都 verified
+        all_verified = all(
+            item.get('status') == 'verified' for item in items
+        ) if items else False
+        deps['all_verified'] = all_verified
+
+        self._save()
+        return {
+            'dep_id': dep_id,
+            'status': target['status'],
+            'output': output[:500],
+            'all_verified': all_verified,
+        }
+
+    def verify_all_deps(self) -> Dict[str, Any]:
+        """对所有 unverified 依赖执行验证"""
+        deps = self.data.get('dependencies', {})
+        items = deps.get('items', [])
+        results = []
+        for item in items:
+            if item.get('status') != 'verified':
+                r = self.verify_dependency(item['id'])
+                results.append(r)
+        return {
+            'verified_count': sum(1 for r in results if r.get('status') == 'verified'),
+            'failed_count': sum(1 for r in results if r.get('status') == 'failed'),
+            'all_verified': deps.get('all_verified', False),
+            'details': results,
+        }
+
+    def phase_status(self) -> Dict[str, Any]:
+        """返回当前 phases 状态"""
+        phases = self.data.get('phases', {})
+        deps = self.data.get('dependencies', {})
+        return {
+            'phases': phases,
+            'dependencies': {
+                'total': len(deps.get('items', [])),
+                'verified': sum(1 for i in deps.get('items', []) if i.get('status') == 'verified'),
+                'all_verified': deps.get('all_verified', False),
+            },
+        }
 
     # ─────────────────────────────────────────────
     # 工具方法
@@ -363,6 +573,10 @@ def main() -> int:
     group.add_argument('--prepare',  action='store_true', help='生成执行计划')
     group.add_argument('--record',   metavar='CASE_ID',   help='记录单个案例结果')
     group.add_argument('--finalize', action='store_true', help='生成执行摘要')
+    group.add_argument('--advance-phase', action='store_true', help='推进到下一阶段')
+    group.add_argument('--verify-dep', metavar='DEP_ID', help='验证单个依赖项')
+    group.add_argument('--verify-all-deps', action='store_true', help='验证所有未验证的依赖')
+    group.add_argument('--phase-status', action='store_true', help='输出当前 phases 状态')
 
     # --record 附属参数
     parser.add_argument('--status',  choices=['passed', 'failed', 'error'], help='案例结果状态')
@@ -377,6 +591,9 @@ def main() -> int:
     parser.add_argument('--trials', type=int, default=3, help='multi_trial 案例的重复次数（默认 3）')
     parser.add_argument('--dimension', type=str, default=None,
                         help='切片测试：只返回指定维度的 pending 案例（如 hit_rate, execution_success）')
+    parser.add_argument('--phase', type=str, default=None,
+                        choices=['phase_a', 'phase_b', 'phase_c'],
+                        help='按阶段过滤：只返回指定 phase 的 pending 案例')
 
     args = parser.parse_args()
 
@@ -387,7 +604,8 @@ def main() -> int:
         return 1
 
     if args.prepare:
-        plan = coord.prepare(trials=args.trials, dimension=args.dimension)
+        plan = coord.prepare(trials=args.trials, dimension=args.dimension,
+                             phase=args.phase)
         print(json.dumps(plan, ensure_ascii=False, indent=2))
 
     elif args.record:
@@ -430,6 +648,22 @@ def main() -> int:
     elif args.finalize:
         summary = coord.finalize()
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+    elif args.advance_phase:
+        result = coord.advance_phase()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    elif args.verify_dep:
+        result = coord.verify_dependency(args.verify_dep)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    elif args.verify_all_deps:
+        result = coord.verify_all_deps()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    elif args.phase_status:
+        result = coord.phase_status()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
     return 0
 

@@ -52,7 +52,7 @@ class ReportBuilder:
     # ──────────────────────────────────────────────
 
     def compute_scores(self) -> Dict[str, float]:
-        """计算四个维度得分，返回 dict，值域 0–100"""
+        """计算四个维度得分，返回 dict，值域 0–100（N/A 维度不计入综合评分）"""
         if self._scores is not None:
             return self._scores
 
@@ -60,16 +60,41 @@ class ReportBuilder:
         spec  = self.spec_score
         comp  = self._score_agent_comprehension()
         exec_ = self._score_execution_success()
-        overall = hit * 0.25 + spec * 0.20 + comp * 0.25 + exec_ * 0.30
+
+        # 检查是否有维度全部被 skipped（返回 -1 表示 N/A）
+        dim_scores = {
+            'hit_rate': hit,
+            'spec_compliance': spec,
+            'agent_comprehension': comp,
+            'execution_success': exec_,
+        }
+
+        # 检查各维度是否全部 skipped
+        for dim_key in ('hit_rate', 'agent_comprehension', 'execution_success'):
+            dim_cases = [c for c in self.cases if c.get('dimension') == dim_key]
+            if dim_cases and all(self._is_skipped(c) for c in dim_cases):
+                dim_scores[dim_key] = -1.0  # sentinel for N/A
+
+        # 计算综合评分，N/A 维度不计入
+        weights = {'hit_rate': 0.25, 'spec_compliance': 0.20,
+                   'agent_comprehension': 0.25, 'execution_success': 0.30}
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for k, w in weights.items():
+            v = dim_scores[k]
+            if v >= 0:
+                weighted_sum += v * w
+                total_weight += w
+        overall = (weighted_sum / total_weight * 1.0) if total_weight > 0 else 0.0
 
         if self.safety.get('status') == 'failed':
             overall = 0.0
 
         self._scores = {
-            'hit_rate':            round(hit,     1),
-            'spec_compliance':     round(spec,    1),
-            'agent_comprehension': round(comp,    1),
-            'execution_success':   round(exec_,   1),
+            'hit_rate':            round(dim_scores['hit_rate'], 1) if dim_scores['hit_rate'] >= 0 else -1.0,
+            'spec_compliance':     round(spec, 1),
+            'agent_comprehension': round(dim_scores['agent_comprehension'], 1) if dim_scores['agent_comprehension'] >= 0 else -1.0,
+            'execution_success':   round(dim_scores['execution_success'], 1) if dim_scores['execution_success'] >= 0 else -1.0,
             'overall':             round(overall, 1),
         }
         return self._scores
@@ -102,11 +127,29 @@ class ReportBuilder:
             'pass_k':    round(pass_k_count    / total * 100, 1) if total else 0.0,
         }
 
+    def _is_skipped(self, case: Dict) -> bool:
+        """判断案例是否被跳过（所在 phase 被 blocked 或状态为 skipped）"""
+        status = case.get('status', '')
+        if status in ('blocked', 'skipped'):
+            return True
+        # 检查案例所在 phase 是否 blocked
+        phases = self.results.get('phases', {})
+        case_phase = case.get('phase', 'phase_a')
+        if case_phase in phases and isinstance(phases[case_phase], dict):
+            if phases[case_phase].get('status') == 'blocked':
+                return True
+        return False
+
+    def _count_skipped(self) -> int:
+        """统计被跳过的案例数"""
+        return sum(1 for c in self.cases if self._is_skipped(c))
+
     def _cases_by(self, dimension: str, type_: Optional[str] = None) -> List[Dict]:
         return [
             c for c in self.cases
             if c.get('dimension') == dimension
             and c.get('status') == 'completed'
+            and not self._is_skipped(c)
             and (type_ is None or c.get('type') == type_)
         ]
 
@@ -175,24 +218,30 @@ class ReportBuilder:
     def get_rating(self) -> str:
         scores  = self.compute_scores()
         overall = scores['overall']
+        skipped = self._count_skipped()
+        suffix = '（部分测试）' if skipped > 0 else ''
 
         if self.safety.get('status') == 'failed':
             return '❌ 不合格'
 
-        min_dim = min(
+        # 计算 min_dim，跳过 N/A（-1）的维度
+        dim_values = [
             scores['hit_rate'], scores['spec_compliance'],
             scores['agent_comprehension'], scores['execution_success']
-        )
+        ]
+        valid_dims = [v for v in dim_values if v >= 0]
+        min_dim = min(valid_dims) if valid_dims else 0.0
+
         if min_dim < SCORE_ACCEPTABLE:
-            return '⭐⭐⭐ 可接受（单维度不达标）'
+            return f'⭐⭐⭐ 可接受（单维度不达标）{suffix}'
 
         if overall >= SCORE_EXCELLENT:
-            return '⭐⭐⭐⭐⭐ 优秀'
+            return f'⭐⭐⭐⭐⭐ 优秀{suffix}'
         if overall >= SCORE_GOOD:
-            return '⭐⭐⭐⭐ 良好'
+            return f'⭐⭐⭐⭐ 良好{suffix}'
         if overall >= SCORE_ACCEPTABLE:
-            return '⭐⭐⭐ 可接受'
-        return '⭐⭐ 需改进'
+            return f'⭐⭐⭐ 可接受{suffix}'
+        return f'⭐⭐ 需改进{suffix}'
 
     def get_badge(self) -> str:
         overall = self.compute_scores()['overall']
@@ -308,6 +357,12 @@ class ReportBuilder:
     # 报告生成
     # ──────────────────────────────────────────────
 
+    def _fmt_score(self, val: float) -> str:
+        """格式化分数，-1 表示 N/A"""
+        if val < 0:
+            return '  N/A'
+        return f'{val:>5.1f}'
+
     def build_markdown(self) -> str:
         scores  = self.compute_scores()
         rel     = self.compute_reliability()
@@ -318,9 +373,12 @@ class ReportBuilder:
         passed  = self.execution.get('passed', 0)
         failed  = self.execution.get('failed', 0)
         dur     = self.execution.get('duration_seconds', 0)
+        skipped = self._count_skipped()
 
         safety_icon = {'passed': '✅ 通过', 'warning': '⚠️ 警告', 'failed': '❌ 失败'}.get(
             self.safety.get('status', ''), '？ 未知')
+
+        coverage_text = '完整' if skipped == 0 else f'部分（{skipped} 个案例因依赖未就绪跳过）'
 
         rel_line = ''
         if rel['available']:
@@ -339,11 +397,12 @@ class ReportBuilder:
             f'║  {self.skill_name[:46]:<46}  ║',
             f'╠════════════════════════════════════════════════════╣',
             f'║  安全检查:     {safety_icon:<38}║',
-            f'║  触发命中率:   {scores["hit_rate"]:>5.1f}%  (×25%)                        ║',
-            f'║  Skill规范:    {scores["spec_compliance"]:>5.1f}%  (×20%)                        ║',
-            f'║  Agent理解度:  {scores["agent_comprehension"]:>5.1f}%  (×25%)  [结果评估]          ║',
-            f'║  执行成功率:   {scores["execution_success"]:>5.1f}%  (×30%)                        ║',
+            f'║  触发命中率:   {self._fmt_score(scores["hit_rate"])}%  (×25%)                        ║',
+            f'║  Skill规范:    {self._fmt_score(scores["spec_compliance"])}%  (×20%)                        ║',
+            f'║  Agent理解度:  {self._fmt_score(scores["agent_comprehension"])}%  (×25%)  [结果评估]          ║',
+            f'║  执行成功率:   {self._fmt_score(scores["execution_success"])}%  (×30%)                        ║',
             f'║  综合评分:     {scores["overall"]:>5.1f}/100  {rating:<28}║',
+            f'║  测试覆盖:     {coverage_text:<38}║',
             f'╠════════════════════════════════════════════════════╣',
             f'║  测试案例: {total:<4} 通过: {passed:<4} 失败: {failed:<4} 耗时: {dur:.0f}s      ║',
         ]
@@ -421,23 +480,30 @@ class ReportBuilder:
         ]
         for dim_key, dim_label in dim_order:
             dim_cases = [c for c in self.cases if c.get('dimension') == dim_key]
-            completed = [c for c in dim_cases if c.get('status') == 'completed']
+            completed = [c for c in dim_cases if c.get('status') == 'completed' and not self._is_skipped(c)]
             passed_n  = sum(1 for c in completed if self._is_passed(c))
             score_val = scores.get(dim_key, 0.0)
+            score_str = 'N/A' if score_val < 0 else f'{score_val:.1f}'
 
             if dim_key == 'spec_compliance':
-                lines += [f'### {dim_label}', '', f'**得分：{score_val:.1f}/100**（静态分析，不涉及测试案例）', '']
+                lines += [f'### {dim_label}', '', f'**得分：{score_str}/100**（静态分析，不涉及测试案例）', '']
                 continue
 
             lines += [
                 f'### {dim_label}',
                 '',
-                f'**得分：{score_val:.1f}/100**  |  案例：{len(completed)}/{len(dim_cases)}  |  通过：{passed_n}',
+                f'**得分：{score_str}/100**  |  案例：{len(completed)}/{len(dim_cases)}  |  通过：{passed_n}',
                 '',
                 '| 状态 | 类型 | 描述 | 输入 | 可靠性 |',
                 '|------|------|------|------|--------|',
             ]
             for c in dim_cases:
+                if self._is_skipped(c):
+                    icon = '⏭️'
+                    desc = (c.get('description') or '')[:30]
+                    inp  = str(c.get('input', ''))[:30]
+                    lines.append(f'| {icon} | {c.get("type","—")} | {desc} | {inp} | — |')
+                    continue
                 passed_flag = self._is_passed(c) if c.get('status') == 'completed' else False
                 r_status = 'passed' if passed_flag else (
                     c.get('result', {}).get('status', 'pending') if c.get('status') == 'completed' else '—'
@@ -494,6 +560,25 @@ class ReportBuilder:
         else:
             lines.append('✅ 所有维度表现良好，暂无优化建议。')
         lines.append('')
+
+        # 跳过的案例章节
+        skipped_cases = [c for c in self.cases if self._is_skipped(c)]
+        if skipped_cases:
+            lines += ['## 跳过的案例', '']
+            lines += [
+                f'共 {len(skipped_cases)} 个案例因依赖未就绪被跳过：',
+                '',
+                '| ID | 类型 | 描述 | Phase | 依赖 |',
+                '|----|------|------|-------|------|',
+            ]
+            for c in skipped_cases:
+                dep_list = ', '.join(c.get('dependency_requires', [])) or '—'
+                lines.append(
+                    f'| {c.get("id", "—")} | {c.get("type", "—")} '
+                    f'| {(c.get("description") or "")[:40]} '
+                    f'| {c.get("phase", "—")} | {dep_list} |'
+                )
+            lines.append('')
 
         return '\n'.join(lines)
 
