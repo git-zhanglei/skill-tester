@@ -1,227 +1,103 @@
-# 多 Agent 并行执行器
+# 执行架构
 
 ## 概述
 
-skill-tester 使用多 Agent 并行执行策略，每个测试案例在独立隔离会话中运行，支持多模型分发。
+skill-tester 使用 `parallel_test_runner.py`（TestCoordinator）配合 OpenClaw Agent 执行测试案例。**实际测试执行（sessions_spawn）由 Agent 发起**，本脚本只负责数据管理：执行计划生成、结果记录、统计汇总。
 
 ## 架构
 
 ```
-ParallelTestRunner
-├── ModelDetector          # 检测 OpenClaw 已配置的模型
-├── TaskDistributor        # 测试案例分发器
-│   ├── balanced           # 均匀分配
-│   ├── round-robin        # 轮询分配
-│   └── dimension-based    # 按维度分配
-├── ThreadPoolExecutor     # 线程池（并行度可配置）
-│   ├── Agent-1 → Session-A (model-x)
-│   ├── Agent-2 → Session-B (model-y)
-│   ├── Agent-3 → Session-C (model-x)
-│   └── Agent-4 → Session-D (model-z)
-└── ResultCollector        # 结果收集与持久化
+TestCoordinator (parallel_test_runner.py)
+├── prepare()          # 生成执行计划（纯净任务描述）
+├── record()           # 记录单条案例结果（含 token 数据）
+├── finalize()         # 汇总统计 + 早期终止检测
+└── JSON 持久化        # 每次 record 自动保存
 ```
 
-## 阶段 2：测试案例生成（Agent 泛化）
+## 执行流程
 
-测试案例不是硬编码的，而是调度 Agent 对 SKILL.md 进行深度解析后泛化生成的。
+### 1. 生成执行计划
+
+```bash
+python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension <dim>]
+```
+
+- 自动跳过非 `pending` 状态的案例（支持断点续跑）
+- `--dimension` 切片：只返回指定维度的 pending 案例
+- 输出纯净 `task_description`：只有用户请求，无测试意图
+- 每个 task 包含 `evaluation_hint`，告知主 Agent 如何评判
+
+### 2. Agent 串行执行
+
+对每个 task，Agent 调用 `sessions_spawn`：
 
 ```python
-# 测试案例生成伪代码
-def generate_test_cases(skill_path: str) -> List[TestCase]:
-    skill_content = read_skill_md(skill_path)
-    
-    # 调度 Agent 泛化生成
-    generator_session = sessions_spawn(
-        task=f"""
-        你是一个 OpenClaw Skill 测试专家。请分析以下 SKILL.md，生成覆盖 4 个测试维度的测试案例。
-        
-        SKILL.md 内容：
-        {skill_content}
-        
-        请生成以下维度的测试案例（JSON 格式）：
-        
-        1. 触发命中率（hit_rate）：
-           - 精确触发词（exact_match）：直接使用 SKILL.md 中声明的触发词
-           - 模糊变体（fuzzy_match）：触发词同义词/衍生词（如口语化、礼貌前后缀），至少 3 个
-           - 负面测试（negative_test）：非同义、无关输入，不应触发 Skill，至少 2 个
-        
-        2. Agent理解度（agent_comprehension）：
-           - 结果检验（outcome_check）：验证最终产物是否满足 Skill 声明目标
-           - 格式检验（format_check）：验证输出结构/字段是否符合 Skill 规范
-        
-        3. 执行成功率（execution_success）：
-           - 正常路径（normal_path）：标准输入
-           - 边界条件（boundary_case）：空输入、路径不存在、极端参数
-           - 异常处理（error_handling）：权限不足、格式错误等
-        
-        注意：Skill规范程度（spec_compliance）由静态评审器处理，无需生成动态测试案例。
-        
-        以 JSON 数组格式输出测试案例，每个案例包含：id, dimension, type, input, expected, description
-        """,
-        timeout=120
-    )
-    
-    return parse_test_cases(generator_session.result)
+result = sessions_spawn(
+    task    = task["task_description"],
+    timeout = 120  # 默认超时 120 秒
+)
+sub_output = result.get("output") or str(result)
+sub_session_id = result.get("session_id") or result.get("id") or ""
 ```
 
-## 阶段 3：并行执行
+**执行真实性门控**：必须拿到 `sub_output` 和 `sub_session_id` 后才可记录。
 
-### 执行流程
+### 3. 记录结果（含 Token 采集）
 
-1. **检测可用模型** — 查询 OpenClaw 配置，获取已配置的模型列表
-2. **分发任务** — 按选定策略将测试案例分配给不同 Agent/模型
-3. **并行执行** — 使用线程池创建独立会话执行每个测试案例
-4. **收集结果** — 实时更新测试案例状态，定期持久化到 JSON 文件
-
-### 单个测试案例执行
-
-```python
-# 子 Agent 执行伪代码
-def execute_test_case(test_case: dict, skill_path: str, model: str = "auto") -> dict:
-    session_config = {}
-    if model != "auto":
-        session_config["model"] = model
-    
-    session = sessions_spawn(
-        task=f"""
-        你正在为 Skill 测试执行一个独立的测试案例。请严格按照以下信息执行。
-        
-        目标 Skill 路径：{skill_path}
-        测试维度：{test_case['dimension']}
-        测试类型：{test_case['type']}
-        测试输入：{test_case['input']}
-        预期结果：{test_case['expected']}
-        测试描述：{test_case['description']}
-        
-        执行步骤：
-        1. 加载并理解 {skill_path}/SKILL.md
-        2. 模拟用户输入：{test_case['input']}
-        3. 观察 Skill 的激活状态和执行行为
-        4. 对照预期结果评估是否通过
-        
-        以 JSON 格式输出结果：
-        {{
-            "status": "passed/failed/error",
-            "activated": true/false,
-            "steps_observed": [...],
-            "tools_called": [...],
-            "output_summary": "...",
-            "actual_vs_expected": "...",
-            "failure_reason": null
-        }}
-        """,
-        timeout=test_case.get('timeout', 60),
-        **session_config
-    )
-    
-    return {
-        "status": parse_status(session.result),
-        "output": session.result,
-        "duration": session.duration,
-        "model_used": model
-    }
+```bash
+python3 parallel_test_runner.py <cases_json> \
+    --record <case_id> --status passed|failed|error \
+    --outcome "输出摘要" --session-id "<id>" \
+    --tokens-in <N> --tokens-out <N> [--trial 1]
 ```
 
-### 多模型分发策略
+- `--tokens-in` / `--tokens-out`：从子 Agent completion event 的 stats 中提取
+- Token 数据保存到每条 case 的 result 中，finalize 时汇总统计
+- `--trial`：multi_trial 案例专用（从 1 开始），所有 trial 完成后自动聚合
 
-#### balanced（默认）
+### 4. 早期终止
 
-均匀分配测试案例到各模型：
-```
-案例 1-10   → model-a
-案例 11-20  → model-b
-案例 21-30  → model-c
-案例 31+    → model-a（循环）
-```
+`finalize()` 会检测早期终止条件：
 
-#### round-robin
+- 最近连续 `EARLY_EXIT_THRESHOLD`（默认 3）个案例都是 failed/error
+- 且 outcome 中包含相似根因关键词（如"未触发"、"超时"、"Skill未被激活"）
+- 满足时 summary 中增加 `early_exit_recommended: true` 和 `early_exit_reason`
 
-每个案例轮询换模型，用于对比模型一致性：
-```
-案例 1 → model-a
-案例 2 → model-b
-案例 3 → model-c
-案例 4 → model-a
-...
-```
+**Agent 在执行过程中也应检测**：如果连续 3 个案例因同一原因失败，停止执行，报告根因，建议修复后重试。
 
-#### dimension-based
+### 5. 断点续跑
 
-按测试维度分配到不同模型，适合专项能力对比：
-```
-hit_rate          → model-a（擅长指令理解）
-agent_comprehension → model-b（擅长推理）
-execution_success → model-c（通用模型）
+`--prepare` 自动跳过已完成的案例。Agent 重入时：
+
+1. 直接 `--prepare` 获取剩余 pending 任务
+2. 继续执行和记录
+3. 全部完成后 `--finalize`
+
+无需手动管理状态——状态持久化在 cases JSON 文件中。
+
+### 6. 汇总
+
+```bash
+python3 parallel_test_runner.py <cases_json> --finalize
 ```
 
-## 执行隔离机制
-
-每个子 Agent 在完全独立的会话中运行：
-- 独立的会话上下文（无共享历史）
-- 独立的文件系统命名空间（沙箱）
-- 独立的环境变量
-- 超时保护（防止单个测试阻塞整体）
-
-## 进度追踪与持久化
-
-每完成 5 个测试案例自动保存到 JSON 文件，防止执行中断丢失结果：
-
-```python
-# 进度更新示例
-def update_progress(test_cases_file: str, case_id: str, result: dict):
-    data = load_json(test_cases_file)
-    case = find_case(data['cases'], case_id)
-    case['status'] = 'completed'
-    case['result'] = result
-    case['completed_at'] = datetime.now().isoformat()
-    
-    data['execution']['progress']['completed'] += 1
-    if result['status'] == 'passed':
-        data['execution']['progress']['passed'] += 1
-    else:
-        data['execution']['progress']['failed'] += 1
-    
-    save_json(test_cases_file, data)
-```
+输出 summary 包含：
+- 常规统计：total / completed / passed / failed / pending / pass_rate
+- Token 统计：total_tokens_in / total_tokens_out / avg_tokens_per_case
+- 早期终止建议（如适用）
 
 ## 错误处理
 
 | 错误类型 | 处理方式 |
 |---------|--------|
-| 超时（timeout） | 标记为 timeout，继续执行其他案例 |
-| 会话异常（error） | 记录错误详情，标记为 error |
-| 断言失败（failed） | 记录预期 vs 实际，标记为 failed |
-| 资源不足 | 降低并行度重试 |
+| 超时 | 记为 `error`，outcome 写明"超时" |
+| sessions_spawn 不可用 | 记为 `error`，不伪造结果 |
+| 断言失败 | 记为 `failed`，记录预期 vs 实际 |
 
-## 结果格式
-
-```json
-{
-  "id": "exec_normal_0",
-  "dimension": "execution_success",
-  "type": "normal_path",
-  "status": "completed",
-  "result": {
-    "status": "passed",
-    "activated": true,
-    "steps_observed": ["安全检查", "测试案例生成", "执行", "报告"],
-    "tools_called": ["sessions_spawn", "write_file"],
-    "output_summary": "生成了包含 30 个测试案例的认证报告",
-    "actual_vs_expected": "符合预期",
-    "failure_reason": null
-  },
-  "model_used": "model-a",
-  "duration": 8.3,
-  "completed_at": "2026-03-23T10:05:30"
-}
-```
-
-## 性能调优建议
+## 性能建议
 
 | 场景 | 推荐配置 |
 |------|--------|
-| 快速验证 | `--parallel 2 --timeout 30` |
-| 标准测试 | `--parallel 4 --timeout 60`（默认） |
-| 高并发 | `--parallel 8 --timeout 90` |
-| 有状态 Skill（如修改配置文件） | `--parallel 1`（串行） |
-| 多模型对比 | `--multi-model --parallel 4` |
+| 快速验证 | `--timeout 60` |
+| 标准测试 | `--timeout 120`（默认） |
+| 有状态 Skill | `--parallel 1`（串行） |

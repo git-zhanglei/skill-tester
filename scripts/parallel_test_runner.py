@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from constants import DEFAULT_TIMEOUT, DEFAULT_PARALLEL, TestStatus
+from constants import DEFAULT_TIMEOUT, DEFAULT_PARALLEL, TestStatus, EARLY_EXIT_THRESHOLD, EARLY_EXIT_REASONS
 
 
 # ─────────────────────────────────────────────────────────
@@ -63,17 +63,23 @@ class TestCoordinator:
     # 步骤 A：生成执行计划
     # ─────────────────────────────────────────────
 
-    def prepare(self, trials: int = 3) -> Dict[str, Any]:
+    def prepare(self, trials: int = 3, dimension: Optional[str] = None) -> Dict[str, Any]:
         """
         为每个 pending 案例生成纯净的任务描述。
 
         「纯净」的含义：task_description 只包含用户请求，
         不含「测试」「Skill名」「预期结果」等会污染测试的信息。
+
+        Args:
+            trials:    multi_trial 案例的重复次数
+            dimension: 若指定，只返回该维度的 pending 案例（切片测试）
         """
         tasks: List[Dict] = []
         for case in self.data.get('cases', []):
             if case.get('status', TestStatus.PENDING) != TestStatus.PENDING:
                 continue  # 跳过已执行或进行中的
+            if dimension and case.get('dimension') != dimension:
+                continue  # 切片过滤：只返回指定维度
 
             dim   = case.get('dimension', '')
             typ   = case.get('type', '')
@@ -120,15 +126,21 @@ class TestCoordinator:
     # ─────────────────────────────────────────────
 
     def record(self, case_id: str, status: str, outcome: str = '',
-               trial: Optional[int] = None, session_id: str = '') -> bool:
+               trial: Optional[int] = None, session_id: str = '',
+               tokens_in: int = 0, tokens_out: int = 0) -> Dict[str, Any]:
         """
         记录 Agent 对一个案例的评估结果。
 
         Args:
-            case_id:  案例 ID
-            status:   'passed' | 'failed' | 'error'
-            outcome:  子 Agent 实际输出摘要（可选）
-            trial:    多试验序号（multi_trial 案例专用，从 1 开始）
+            case_id:    案例 ID
+            status:     'passed' | 'failed' | 'error'
+            outcome:    子 Agent 实际输出摘要（可选）
+            trial:      多试验序号（multi_trial 案例专用，从 1 开始）
+            tokens_in:  本次执行消耗的输入 token 数
+            tokens_out: 本次执行消耗的输出 token 数
+
+        Returns:
+            dict: {"recorded": True/False, "case_id": ..., "status": ..., ...}
         """
         for case in self.data.get('cases', []):
             if case['id'] != case_id:
@@ -145,25 +157,29 @@ class TestCoordinator:
                     'status':  status,
                     'outcome': outcome,
                     'session_id': session_id,
+                    'tokens_in': tokens_in,
+                    'tokens_out': tokens_out,
                     'recorded_at': now,
                 })
                 expected_trials = case.get('trial_count', 3)
-                # 只要有 trial 记录就标记为完成（支持提前终止或单试验模式）
-                all_statuses = [t['status'] for t in case['trials']]
-                agg_status = (
-                    TestStatus.PASSED
-                    if any(s == TestStatus.PASSED for s in all_statuses)
-                    else TestStatus.FAILED
-                )
-                case['status']       = TestStatus.COMPLETED
-                case['completed_at'] = now
-                case['result']       = {
-                    'status':  agg_status,
-                    'outcome': outcome,
-                    'session_id': session_id,
-                    'pass_at_k': sum(1 for s in all_statuses if s == TestStatus.PASSED),
-                    'k':         len(case['trials']),
-                }
+                if len(case['trials']) >= expected_trials:
+                    all_statuses = [t['status'] for t in case['trials']]
+                    agg_status = (
+                        TestStatus.PASSED
+                        if any(s == TestStatus.PASSED for s in all_statuses)
+                        else TestStatus.FAILED
+                    )
+                    case['status']       = TestStatus.COMPLETED
+                    case['completed_at'] = now
+                    case['result']       = {
+                        'status':  agg_status,
+                        'outcome': outcome,
+                        'session_id': session_id,
+                        'pass_at_k': sum(1 for s in all_statuses if s == TestStatus.PASSED),
+                        'k':         expected_trials,
+                        'tokens_in': sum(t.get('tokens_in', 0) for t in case['trials']),
+                        'tokens_out': sum(t.get('tokens_out', 0) for t in case['trials']),
+                    }
             else:
                 # ── Single-trial ──
                 case['status']       = TestStatus.COMPLETED
@@ -172,12 +188,28 @@ class TestCoordinator:
                     'status': status,
                     'outcome': outcome,
                     'session_id': session_id,
+                    'tokens_in': tokens_in,
+                    'tokens_out': tokens_out,
                 }
 
             self._save()
-            return True
 
-        return False  # case_id not found
+            result = {'recorded': True, 'case_id': case_id, 'status': status}
+
+            # 实时早期终止检测
+            completed = [c for c in self.data.get('cases', []) if c.get('status') == TestStatus.COMPLETED]
+            early_exit = self._detect_early_exit(completed)
+            if early_exit:
+                # 在 JSON 中标记，Agent 下次 --prepare 或读取时能看到
+                self.data.setdefault('execution', {})['early_exit_recommended'] = True
+                self.data['execution']['early_exit_reason'] = early_exit
+                self._save()
+                result['early_exit_recommended'] = True
+                result['early_exit_reason'] = early_exit
+
+            return result
+
+        return {'recorded': False, 'error': 'case_id not found'}  # case_id not found
 
     # ─────────────────────────────────────────────
     # 步骤 C：汇总并保存
@@ -191,6 +223,14 @@ class TestCoordinator:
         failed_n  = len(completed) - passed_n
         pending_n = sum(1 for c in cases if c.get('status') == TestStatus.PENDING)
 
+        # Token 汇总统计
+        total_tokens_in  = sum((c.get('result') or {}).get('tokens_in', 0) for c in completed)
+        total_tokens_out = sum((c.get('result') or {}).get('tokens_out', 0) for c in completed)
+        avg_tokens_per_case = (
+            round((total_tokens_in + total_tokens_out) / len(completed))
+            if completed else 0
+        )
+
         summary = {
             'total':           len(cases),
             'completed':       len(completed),
@@ -199,8 +239,17 @@ class TestCoordinator:
             'pending':         pending_n,
             'completion_rate': round(len(completed) / len(cases) * 100, 1) if cases else 0.0,
             'pass_rate':       round(passed_n / len(completed) * 100, 1) if completed else 0.0,
+            'total_tokens_in':     total_tokens_in,
+            'total_tokens_out':    total_tokens_out,
+            'avg_tokens_per_case': avg_tokens_per_case,
             'finalized_at':    datetime.now().isoformat(),
         }
+
+        # 早期终止检测：最近连续 N 个案例是否因同一根因失败
+        early_exit = self._detect_early_exit(completed)
+        if early_exit:
+            summary['early_exit_recommended'] = True
+            summary['early_exit_reason'] = early_exit
 
         exec_info = self.data.setdefault('execution', {})
         exec_info['status']     = 'completed' if not pending_n else 'partial'
@@ -220,7 +269,31 @@ class TestCoordinator:
     def _is_passed(self, case: Dict) -> bool:
         if case.get('multi_trial') and case.get('trials'):
             return any(t.get('status') == TestStatus.PASSED for t in case['trials'])
-        return case.get('result', {}).get('status') == TestStatus.PASSED
+        return (case.get('result') or {}).get('status') == TestStatus.PASSED
+
+    def _detect_early_exit(self, completed: List[Dict]) -> Optional[str]:
+        """检测是否应建议早期终止（最近连续 N 个案例因同一根因失败）"""
+        if len(completed) < EARLY_EXIT_THRESHOLD:
+            return None
+
+        # 取最近 N 个已完成案例
+        recent = completed[-EARLY_EXIT_THRESHOLD:]
+        # 全部为 failed/error 才触发
+        if not all(not self._is_passed(c) for c in recent):
+            return None
+
+        # 检查 outcome 中是否包含相似关键词
+        outcomes = [
+            (c.get('result') or {}).get('outcome', '') for c in recent
+        ]
+        for reason_key, keywords in EARLY_EXIT_REASONS.items():
+            if all(
+                any(kw in outcome for kw in keywords)
+                for outcome in outcomes
+            ):
+                return reason_key
+
+        return '连续失败（根因未分类）'
 
     def _calc_duration(self) -> float:
         exec_info = self.data.get('execution', {})
@@ -276,9 +349,13 @@ def main() -> int:
     parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（必填，建议包含原始输出摘要）')
     parser.add_argument('--trial',   type=int,   help='多试验序号（multi_trial 专用）')
     parser.add_argument('--session-id', default='', help='sessions_spawn 返回的会话 ID（必填）')
+    parser.add_argument('--tokens-in',  type=int, default=0, help='本次执行消耗的输入 token 数')
+    parser.add_argument('--tokens-out', type=int, default=0, help='本次执行消耗的输出 token 数')
 
     # --prepare 附属参数
     parser.add_argument('--trials', type=int, default=3, help='multi_trial 案例的重复次数（默认 3）')
+    parser.add_argument('--dimension', type=str, default=None,
+                        help='切片测试：只返回指定维度的 pending 案例（如 hit_rate, execution_success）')
 
     args = parser.parse_args()
 
@@ -289,7 +366,7 @@ def main() -> int:
         return 1
 
     if args.prepare:
-        plan = coord.prepare(trials=args.trials)
+        plan = coord.prepare(trials=args.trials, dimension=args.dimension)
         print(json.dumps(plan, ensure_ascii=False, indent=2))
 
     elif args.record:
@@ -302,18 +379,17 @@ def main() -> int:
         if not args.session_id.strip():
             print('❌ --record 必须提供 --session-id（来自 sessions_spawn 结果）', file=sys.stderr)
             return 1
-        ok = coord.record(
+        result = coord.record(
             case_id=args.record,
             status=args.status,
             outcome=args.outcome,
             trial=args.trial,
             session_id=args.session_id,
+            tokens_in=args.tokens_in,
+            tokens_out=args.tokens_out,
         )
-        if ok:
-            print(json.dumps({'recorded': True, 'case_id': args.record,
-                              'status': args.status}, ensure_ascii=False))
-        else:
-            print(f'❌ case_id "{args.record}" 未找到', file=sys.stderr)
+        print(json.dumps(result, ensure_ascii=False))
+        if not result.get('recorded'):
             return 1
 
     elif args.finalize:

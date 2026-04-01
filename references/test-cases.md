@@ -2,8 +2,23 @@
 
 ## 概述
 
-skill-tester 的测试案例覆盖 4 个维度。案例由 Agent 泛化生成，保存为 JSON 文件，支持复用与断点续测。
-最大案例数默认 30（上限），实际生成数可小于 30。
+skill-tester 的测试案例覆盖 4 个维度。案例可通过 `smart_test_generator.py` 自动生成基础案例，再由 Agent 审查补充。保存为 JSON 文件，支持复用与断点续测。最大案例数默认 30（上限），实际生成数可小于 30。
+
+### 自动生成
+
+```bash
+python3 scripts/smart_test_generator.py <skill_path>
+```
+
+自动分析目标 SKILL.md，生成覆盖四维度的基础案例。Agent 在此基础上审查、补充业务逻辑相关的测试案例。
+
+### 切片测试
+
+使用 `--dimension` 参数只执行指定维度的 pending 案例：
+
+```bash
+python3 scripts/parallel_test_runner.py <cases_json> --prepare --dimension hit_rate
+```
 
 在进入执行前，主流程应向用户展示**全部测试案例**（而不是部分样例），并在用户确认后开始执行。
 
@@ -124,11 +139,15 @@ python3 scripts/spec_checker.py <skill_path> --json
 
 真实执行多种场景，验证 Skill 能否成功完成任务。
 
-| 测试类型 | 说明 | 通过目标 |
-|---------|------|--------|
-| `normal_path` | 标准输入，Skill 应完整执行 | ≥ 90% |
-| `boundary_case` | 边界输入（空路径、超长输入等） | ≥ 70% |
-| `error_handling` | 异常输入（无效路径、权限不足等） | ≥ 60% |
+| 测试类型 | 说明 | 权重 | 通过目标 |
+|---------|------|------|--------|
+| `normal_path` | 标准输入，Skill 应完整执行 | 40% | ≥ 90% |
+| `boundary_case` | 边界输入（空路径、超长输入等） | 25% | ≥ 70% |
+| `error_handling` | 异常输入（无效路径、权限不足等） | 20% | ≥ 60% |
+| `adversarial` | 歧义/越权/空输入，预期拒绝并说明 | 10% | ≥ 60% |
+| `idempotency_check` | 执行两次相同操作，验证结果一致 | 5% | ≥ 80% |
+
+> `idempotency_check` 补充：对实时数据类 Skill（天气/股价等），改为验证**输出格式**一致而非数据值一致。
 
 **示例：**
 ```json
@@ -186,6 +205,7 @@ python3 scripts/spec_checker.py <skill_path> --json
       "completed_at": null
     }
   ],
+  "notes": "result 对象在完成后包含 tokens_in 和 tokens_out 字段，记录该案例的 token 消耗",
   "execution": {
     "status": "pending",
     "parallel_degree": 4,

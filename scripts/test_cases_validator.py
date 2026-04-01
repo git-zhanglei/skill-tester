@@ -93,9 +93,9 @@ class TestCasesValidator:
         
         total = len(cases)
         completed = sum(1 for c in cases if c.get('status') == 'completed')
-        passed = sum(1 for c in cases if c.get('result', {}).get('status') == 'passed')
-        failed = sum(1 for c in cases if c.get('result', {}).get('status') == 'failed')
-        errors = sum(1 for c in cases if c.get('result', {}).get('status') == 'error')
+        passed = sum(1 for c in cases if (c.get('result') or {}).get('status') == 'passed')
+        failed = sum(1 for c in cases if (c.get('result') or {}).get('status') == 'failed')
+        errors = sum(1 for c in cases if (c.get('result') or {}).get('status') == 'error')
         pending = total - completed
         
         # 按维度统计
@@ -107,7 +107,7 @@ class TestCasesValidator:
             by_dimension[dim]['total'] += 1
             if case.get('status') == 'completed':
                 by_dimension[dim]['completed'] += 1
-                if case.get('result', {}).get('status') == 'passed':
+                if (case.get('result') or {}).get('status') == 'passed':
                     by_dimension[dim]['passed'] += 1
         
         return {

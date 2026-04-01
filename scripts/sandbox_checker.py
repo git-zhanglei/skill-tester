@@ -24,6 +24,7 @@ class SandboxChecker:
             'capability': 'environment_variables',
             'label': '环境变量',
             'reason': '检测到环境变量依赖（如 API Key / Token），默认沙箱无法直接继承宿主机密钥',
+            'setup_instructions': '请在运行测试前设置相关环境变量（如 export ALI_1688_AK=xxx），或通过目标 Skill 的配置命令设置',
             'patterns': [
                 r'os\.environ',
                 r'os\.getenv',
@@ -38,6 +39,7 @@ class SandboxChecker:
             'capability': 'network_access',
             'label': '网络访问',
             'reason': '检测到外部网络/API 依赖，沙箱通常禁网或网络受限',
+            'setup_instructions': '确保测试环境可访问外部网络。若在沙箱中测试，需配置网络白名单或代理',
             'patterns': [
                 r'https?://',
                 r'\bcurl\b',
@@ -55,6 +57,7 @@ class SandboxChecker:
             'capability': 'browser_tools',
             'label': '浏览器能力',
             'reason': '检测到浏览器/页面自动化依赖，沙箱环境通常不会默认开放浏览器能力',
+            'setup_instructions': '确保 OpenClaw 浏览器能力可用（browser tool 已配置），或在有头模式下测试',
             'patterns': [
                 r'\bplaywright\b',
                 r'\bchrome[-_ ]devtools\b',
@@ -97,6 +100,7 @@ class SandboxChecker:
                         'capability': rule['capability'],
                         'label': rule['label'],
                         'reason': rule['reason'],
+                        'setup_instructions': rule.get('setup_instructions', ''),
                         'evidence': [],
                     })
                     if len(entry['evidence']) < 3:
@@ -111,10 +115,17 @@ class SandboxChecker:
             else f'待测试 Skill 依赖 {"、".join(labels)}，无法在沙箱中完整测试，可能影响本地环境'
         )
 
+        # 汇总所有需要补齐的依赖操作
+        setup_checklist = [
+            {'capability': d['capability'], 'label': d['label'], 'action': d['setup_instructions']}
+            for d in dependencies if d.get('setup_instructions')
+        ]
+
         return {
             'status': 'sandbox_compatible' if sandbox_testable else 'sandbox_incompatible',
             'sandbox_testable': sandbox_testable,
             'dependencies': dependencies,
+            'setup_checklist': setup_checklist,
             'risk_notice': risk_notice,
         }
 

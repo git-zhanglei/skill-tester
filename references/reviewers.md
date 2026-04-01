@@ -165,29 +165,57 @@ def calculate_comprehension_score(test_results: list, skill_md: str) -> float:
 
 ## 维度 4：执行成功率评审器（权重 30%）
 
-统计各场景类型的通过率。
+统计各场景类型的通过率（含 adversarial 和 idempotency_check）。
 
 ```python
 def calculate_execution_score(test_results: list) -> float:
-    normal_tests   = [r for r in test_results if r['type'] == 'normal_path'     and r['dimension'] == 'execution_success']
-    boundary_tests = [r for r in test_results if r['type'] == 'boundary_case'   and r['dimension'] == 'execution_success']
-    error_tests    = [r for r in test_results if r['type'] == 'error_handling'  and r['dimension'] == 'execution_success']
+    normal      = [r for r in test_results if r['type'] == 'normal_path'       and r['dimension'] == 'execution_success']
+    boundary    = [r for r in test_results if r['type'] == 'boundary_case'     and r['dimension'] == 'execution_success']
+    error_h     = [r for r in test_results if r['type'] == 'error_handling'    and r['dimension'] == 'execution_success']
+    adversarial = [r for r in test_results if r['type'] == 'adversarial'       and r['dimension'] == 'execution_success']
+    idempotency = [r for r in test_results if r['type'] == 'idempotency_check' and r['dimension'] == 'execution_success']
     
-    normal_rate   = pass_rate(normal_tests)   if normal_tests   else 1.0
-    boundary_rate = pass_rate(boundary_tests) if boundary_tests else 1.0
-    error_rate    = pass_rate(error_tests)    if error_tests    else 1.0
+    # 加权合并：normal×0.40 + boundary×0.25 + error×0.20 + adversarial×0.10 + idempotency×0.05
+    w_n = len(normal)      * 0.40
+    w_b = len(boundary)    * 0.25
+    w_e = len(error_h)     * 0.20
+    w_a = len(adversarial) * 0.10
+    w_i = len(idempotency) * 0.05
+    total_w = w_n + w_b + w_e + w_a + w_i
+    if total_w == 0:
+        return 0.0
     
-    # 正常路径权重最高（正常:边界:异常 = 5:3:2）
-    execution_score = (normal_rate * 0.5 + boundary_rate * 0.3 + error_rate * 0.2) * 100
-    return execution_score
+    p_n = sum(1 for c in normal      if is_passed(c))
+    p_b = sum(1 for c in boundary    if is_passed(c))
+    p_e = sum(1 for c in error_h     if is_passed(c))
+    p_a = sum(1 for c in adversarial if is_passed(c))
+    p_i = sum(1 for c in idempotency if is_passed(c))
+    return (p_n * 0.40 + p_b * 0.25 + p_e * 0.20 + p_a * 0.10 + p_i * 0.05) / total_w * 100
 ```
 
 **分析要点：**
 - 正常路径失败率高 → Skill 核心功能有问题，优先修复
 - 边界条件失败率高 → Skill 输入验证不足
 - 异常处理失败 → Skill 缺乏错误处理指导
+- 对抗性测试失败 → Skill 缺乏输入边界防护
+- 幂等性测试失败 → Skill 输出不稳定或有副作用
 
 ---
+
+## Token 成本（参考维度）
+
+Token 消耗在报告中展示但不计入综合评分。作为参考维度：
+
+- **总 Token 消耗**：所有案例的 tokens_in + tokens_out 总和
+- **平均每案例**：总 Token / 完成案例数
+- **最高单案例**：最消耗 Token 的单个案例
+
+Token 数据从子 Agent 执行后的 completion event stats 中提取，记录时通过 `--tokens-in` / `--tokens-out` 参数传入。
+
+高 Token 消耗可能提示：
+- 测试案例输入过于复杂
+- 目标 Skill SKILL.md 过长（建议精简或使用渐进式披露）
+- Skill 触发后调用了大量子流程
 
 ## 综合报告生成
 

@@ -114,7 +114,7 @@ class ReportBuilder:
         """判断案例是否通过（支持 multi_trial）"""
         if case.get('multi_trial') and case.get('trials'):
             return any(t.get('status') == 'passed' for t in case['trials'])
-        return case.get('result', {}).get('status') == 'passed'
+        return (case.get('result') or {}).get('status') == 'passed'
 
     def _score_hit_rate(self) -> float:
         exact    = self._cases_by('hit_rate', 'exact_match')
@@ -146,16 +146,18 @@ class ReportBuilder:
         return passed / len(all_) * 100
 
     def _score_execution_success(self) -> float:
-        normal     = self._cases_by('execution_success', 'normal_path')
-        boundary   = self._cases_by('execution_success', 'boundary_case')
-        error_h    = self._cases_by('execution_success', 'error_handling')
+        normal      = self._cases_by('execution_success', 'normal_path')
+        boundary    = self._cases_by('execution_success', 'boundary_case')
+        error_h     = self._cases_by('execution_success', 'error_handling')
         adversarial = self._cases_by('execution_success', 'adversarial')
+        idempotency = self._cases_by('execution_success', 'idempotency_check')
 
         w_n = len(normal)      * 0.40
         w_b = len(boundary)    * 0.25
         w_e = len(error_h)     * 0.20
-        w_a = len(adversarial) * 0.15
-        total_w = w_n + w_b + w_e + w_a
+        w_a = len(adversarial) * 0.10
+        w_i = len(idempotency) * 0.05
+        total_w = w_n + w_b + w_e + w_a + w_i
         if total_w == 0:
             return 0.0
 
@@ -163,7 +165,8 @@ class ReportBuilder:
         p_b = sum(1 for c in boundary    if self._is_passed(c))
         p_e = sum(1 for c in error_h     if self._is_passed(c))
         p_a = sum(1 for c in adversarial if self._is_passed(c))
-        return (p_n * 0.40 + p_b * 0.25 + p_e * 0.20 + p_a * 0.15) / total_w * 100
+        p_i = sum(1 for c in idempotency if self._is_passed(c))
+        return (p_n * 0.40 + p_b * 0.25 + p_e * 0.20 + p_a * 0.10 + p_i * 0.05) / total_w * 100
 
     # ──────────────────────────────────────────────
     # 评级与认证
@@ -314,6 +317,29 @@ class ReportBuilder:
             '```',
             '',
         ]
+
+        # 执行成本（Token 消耗）
+        token_cases = [
+            c for c in self.cases
+            if c.get('status') == 'completed' and c.get('result')
+        ]
+        total_tokens_in  = sum((c['result'] or {}).get('tokens_in', 0) for c in token_cases)
+        total_tokens_out = sum((c['result'] or {}).get('tokens_out', 0) for c in token_cases)
+        total_tokens = total_tokens_in + total_tokens_out
+        if total_tokens > 0:
+            avg_tokens = round(total_tokens / len(token_cases)) if token_cases else 0
+            max_tokens = max(
+                ((c['result'] or {}).get('tokens_in', 0) + (c['result'] or {}).get('tokens_out', 0))
+                for c in token_cases
+            ) if token_cases else 0
+            lines += [
+                '### 执行成本',
+                '',
+                f'- 总 Token 消耗：{total_tokens:,}（输入 {total_tokens_in:,} + 输出 {total_tokens_out:,}）',
+                f'- 平均每案例：{avg_tokens:,} tokens',
+                f'- 最高单案例：{max_tokens:,} tokens',
+                '',
+            ]
 
         # 安全详情
         lines += ['## 安全检查', '']

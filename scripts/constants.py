@@ -67,8 +67,19 @@ DIMENSION_WEIGHTS = {
 
 # 默认执行配置
 DEFAULT_PARALLEL  = 4
-DEFAULT_TIMEOUT   = 60
+DEFAULT_TIMEOUT   = 120
 DEFAULT_MAX_CASES = 30   # 与 SKILL.md "质量优先，总数≤30" 一致
+
+# 早期终止配置
+EARLY_EXIT_THRESHOLD = 3  # 连续同因失败 N 次则建议终止
+
+# 已知根因分类（用于早期终止检测）
+EARLY_EXIT_REASONS = {
+    'skill_not_activated': ['未触发', 'Skill未被激活', 'not_activate', '未激活', '没有触发'],
+    'timeout':            ['超时', 'timeout', 'timed out', 'TIMEOUT'],
+    'spawn_unavailable':  ['sessions_spawn', '不可用', 'unavailable', '无法调用'],
+    'dependency_missing': ['依赖缺失', '环境变量未设置', 'API Key', '网络不可达', '权限不足'],
+}
 
 # 评分阈值
 SCORE_EXCELLENT = 90

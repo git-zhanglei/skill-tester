@@ -2,6 +2,21 @@
 
 将 skill-tester 集成到持续集成流程，在每次提交时自动检测 Skill 质量下降。
 
+## 质量门禁脚本 ci_gate.py
+
+`ci_gate.py` 读取 `report_builder.py` 生成的 JSON 报告，根据阈值判断是否通过质量门禁：
+
+```bash
+# 使用默认阈值（综合 ≥ 40，各维度 ≥ 40）
+python3 scripts/ci_gate.py report.json
+
+# 自定义阈值
+python3 scripts/ci_gate.py report.json --min-overall 70 --min-dimension 60
+```
+
+- exit 0 = 通过
+- exit 1 = 未通过（输出哪些维度不达标）
+
 ## 报告获取方式
 
 Agent 执行测试后，结果 JSON 保存在当前工作目录。使用 `--output-json` 标志生成机器可读的 JSON 报告：
@@ -10,7 +25,7 @@ Agent 执行测试后，结果 JSON 保存在当前工作目录。使用 `--outp
 测试skill <skill_path> --yes --output-json
 ```
 
-`report_builder.py` 可直接用 `python3` 调用生成报告文件：
+`report_builder.py` 也可直接调用：
 
 ```bash
 python3 scripts/report_builder.py results.json --output report.md --json
@@ -36,21 +51,33 @@ jobs:
 
       - name: 安全检查
         run: |
-          cd scripts
-          python3 safety_checker.py ../
-          STATUS=$(python3 safety_checker.py ../ | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d['status']!='failed' else 1)")
+          python3 scripts/safety_checker.py ./ | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          if d['status'] == 'failed':
+              print('❌ 安全检查失败')
+              sys.exit(1)
+          print('✅ 安全检查通过')
+          "
 
       - name: 规范程度检查
+        run: python3 scripts/spec_checker.py ./ --json
+
+      - name: 生成报告
         run: |
-          cd scripts
-          python3 smart_test_generator.py ../
+          python3 scripts/report_builder.py results.json --output report.md --json
+
+      - name: 质量门禁
+        run: python3 scripts/ci_gate.py report.json --min-overall 40 --min-dimension 40
 
       - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: skill-tester-report
-          path: test-report-*.md
+          path: |
+            test-report-*.md
+            report.json
 ```
 
 ## GitLab CI 示例
@@ -59,11 +86,14 @@ jobs:
 skill-certify:
   stage: test
   script:
-    - cd scripts && python3 safety_checker.py ../
-    - cd scripts && python3 smart_test_generator.py ../
+    - python3 scripts/safety_checker.py ./
+    - python3 scripts/spec_checker.py ./ --json
+    - python3 scripts/report_builder.py results.json --output report.md --json
+    - python3 scripts/ci_gate.py report.json --min-overall 40
   artifacts:
     paths:
       - test-report-*.md
+      - report.json
     when: always
   rules:
     - changes:
@@ -81,22 +111,3 @@ skill-certify:
 | Agent 理解度 | ≥ 60% | ≥ 80% |
 | 执行成功率 | ≥ 60% | ≥ 85% |
 | 综合评分 | ≥ 40 | ≥ 70 |
-
-## 解析 JSON 报告的 Shell 示例
-
-`report_builder.py` 生成的 JSON 报告中，综合评分位于 `summary.overall_score`：
-
-```bash
-SCORE=$(python3 -c "
-import json, sys
-with open('test-report-*.json') as f:
-    d = json.load(f)
-print(d['summary']['overall_score'])
-")
-
-if (( $(echo "$SCORE < 40" | bc -l) )); then
-  echo "❌ 综合评分 $SCORE 低于最低要求，流水线失败"
-  exit 1
-fi
-echo "✅ 综合评分 $SCORE，通过质量门控"
-```
