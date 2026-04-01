@@ -267,6 +267,44 @@ class ReportBuilder:
         return recs[:8]  # 最多 8 条
 
     # ──────────────────────────────────────────────
+    # 修复建议
+    # ──────────────────────────────────────────────
+
+    def _suggest_fix(self, case: Dict) -> str:
+        """为失败案例生成可执行修复建议"""
+        dim = case.get('dimension', '')
+        typ = case.get('type', '')
+        outcome = (case.get('result') or {}).get('outcome', '')
+
+        if dim == 'hit_rate':
+            if typ == 'exact_match':
+                return f'检查 SKILL.md description 中是否包含触发词「{case.get("input", "")}」'
+            elif typ == 'fuzzy_match':
+                return '扩展 description 中的触发上下文短语，增加同义词覆盖'
+            elif typ == 'negative_test':
+                return '触发词过于宽泛，考虑在 description 中增加排除条件'
+
+        if dim == 'agent_comprehension':
+            if typ == 'outcome_check':
+                return '明确声明预期输出（如 JSON 字段、结果结构），而非仅描述步骤'
+            elif typ == 'format_check':
+                return '在 SKILL.md 中增加输出格式的代码示例'
+
+        if dim == 'execution_success':
+            if '超时' in outcome or 'timeout' in outcome.lower():
+                return '优化 SKILL.md 正文长度（当前加载 + references 可能超时），或提高 --timeout'
+            if '未触发' in outcome or 'not_activate' in outcome:
+                return '确保目标 Skill 已在 available_skills 中配置'
+            if typ == 'error_handling':
+                return '在 Guardrails 或执行步骤中增加错误场景的处理说明'
+            if typ == 'boundary_case':
+                return '增加参数校验逻辑，明确处理空输入或缺失参数的情况'
+            if typ == 'adversarial':
+                return '在 Guardrails 中明确声明权限边界和拒绝策略'
+
+        return '检查失败原因并修复相关逻辑'
+
+    # ──────────────────────────────────────────────
     # 报告生成
     # ──────────────────────────────────────────────
 
@@ -437,6 +475,8 @@ class ReportBuilder:
                     lines.append(f'- **实际产物：** {r["outcome"]}')
                 if r.get('failure_reason'):
                     lines.append(f'- **失败原因：** {r["failure_reason"]}')
+                fix = self._suggest_fix(c)
+                lines.append(f'- **修复建议：** {fix}')
                 lines.append('')
 
         # P0/P1/P2 优化建议

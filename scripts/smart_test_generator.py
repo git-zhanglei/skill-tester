@@ -5,7 +5,7 @@
 
 import re
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 
 class SmartTestGenerator:
@@ -62,17 +62,55 @@ class SmartTestGenerator:
         }
     
     def _parse_content(self, content: str):
-        """解析 frontmatter 和 body"""
-        if content.startswith('---'):
-            parts = content.split('---', 2)
-            if len(parts) >= 3:
-                for line in parts[1].strip().split('\n'):
-                    if ':' in line:
-                        key, value = line.split(':', 1)
-                        self.frontmatter[key.strip()] = value.strip().strip('"\'')
-                self.body = parts[2].strip()
-        else:
+        """解析 frontmatter 和 body，支持多行 YAML 值"""
+        if not content.startswith('---'):
             self.body = content
+            return
+
+        parts = content.split('---', 2)
+        if len(parts) < 3:
+            self.body = content
+            return
+
+        raw_fm = parts[1].strip()
+        self.body = parts[2].strip()
+
+        # 简易 YAML 解析（不引入 pyyaml 依赖）
+        current_key = None
+        current_value_lines: list = []
+
+        for line in raw_fm.split('\n'):
+            # 续行（以空格/tab开头，或空行在多行值中）
+            if current_key and (line.startswith(' ') or line.startswith('\t')):
+                current_value_lines.append(line.strip())
+                continue
+
+            # 新键值对
+            if ':' in line:
+                # 先保存上一个键
+                if current_key:
+                    self.frontmatter[current_key] = ' '.join(current_value_lines).strip().strip('"\'')
+
+                key, _, value = line.partition(':')
+                current_key = key.strip()
+                value = value.strip()
+
+                # 处理引号包裹的值（可能含冒号）
+                if value.startswith('"') and value.endswith('"'):
+                    current_value_lines = [value[1:-1]]
+                elif value.startswith("'") and value.endswith("'"):
+                    current_value_lines = [value[1:-1]]
+                elif value in ('|', '>', '|+', '>-', '|-', '>+'):
+                    # YAML 块标量，后续行是值
+                    current_value_lines = []
+                elif value:
+                    current_value_lines = [value]
+                else:
+                    current_value_lines = []
+
+        # 保存最后一个键
+        if current_key:
+            self.frontmatter[current_key] = ' '.join(current_value_lines).strip().strip('"\'')
     
     def _analyze_complexity(self) -> Dict[str, Any]:
         """分析 skill 复杂度"""
@@ -145,6 +183,87 @@ class SmartTestGenerator:
         
         return risks
     
+    def _extract_commands(self) -> List[Dict[str, Any]]:
+        """从 SKILL.md 正文中提取命令/子命令及其参数"""
+        commands: List[Dict[str, Any]] = []
+
+        # 模式 1：代码块中的 CLI 命令（如 python3 cli.py search <keyword>）
+        code_blocks = re.findall(r'```(?:bash|shell|sh)?\n(.*?)```', self.body, re.DOTALL)
+        for block in code_blocks:
+            for line in block.strip().split('\n'):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # 提取命令和参数
+                cmd_match = re.match(r'(?:python3?\s+)?(\S+\.py)\s+(.*)', line)
+                if cmd_match:
+                    script = cmd_match.group(1)
+                    args_str = cmd_match.group(2)
+                    # 提取子命令和参数
+                    parts = args_str.split()
+                    subcmd = parts[0] if parts else ''
+                    params = [p for p in parts[1:] if p.startswith('<') or p.startswith('--')]
+                    commands.append({
+                        'script': script,
+                        'subcmd': subcmd,
+                        'params': params,
+                        'full_line': line,
+                    })
+
+        # 模式 2：markdown 中的命令列表（如 - `search <keyword>` — 搜索商品）
+        cmd_list_pattern = r'[-*]\s*`([^`]+)`\s*[—\-:：]\s*(.+)'
+        for match in re.finditer(cmd_list_pattern, self.body):
+            cmd_text = match.group(1).strip()
+            desc = match.group(2).strip()
+            parts = cmd_text.split()
+            commands.append({
+                'subcmd': parts[0] if parts else cmd_text,
+                'params': parts[1:],
+                'description': desc,
+                'full_line': cmd_text,
+            })
+
+        # 模式 3：表格中的命令（如 | search | 搜索商品 | keyword |）
+        table_rows = re.findall(r'\|([^|]+)\|([^|]+)\|([^|]*)\|', self.body)
+        for row in table_rows:
+            cells = [c.strip() for c in row]
+            # 跳过表头和分隔行
+            if cells[0].startswith('-') or cells[0].lower() in ('命令', 'command', '子命令', '操作'):
+                continue
+            if cells[0] and not cells[0].startswith('-'):
+                commands.append({
+                    'subcmd': cells[0],
+                    'description': cells[1] if len(cells) > 1 else '',
+                    'params': cells[2].split() if len(cells) > 2 and cells[2] else [],
+                    'full_line': cells[0],
+                })
+
+        return commands
+
+    def _extract_output_format(self) -> Optional[Dict[str, Any]]:
+        """提取 SKILL.md 中声明的输出格式"""
+        import json as _json
+
+        # 查找 JSON 示例输出
+        json_blocks = re.findall(r'```(?:json)?\n(\{.*?\})\n```', self.body, re.DOTALL)
+        if json_blocks:
+            try:
+                sample = _json.loads(json_blocks[0])
+                return {'type': 'json', 'fields': list(sample.keys()), 'sample': json_blocks[0][:200]}
+            except (_json.JSONDecodeError, Exception):
+                pass
+
+        # 查找输出格式描述
+        format_section = re.search(
+            r'(?:输出格式|Output|输出|返回格式|Response)[：:\s]*\n((?:[-*].*\n)+)',
+            self.body, re.IGNORECASE
+        )
+        if format_section:
+            fields = re.findall(r'[-*]\s*\**(\w+)\**', format_section.group(1))
+            return {'type': 'structured', 'fields': fields}
+
+        return None
+
     def _generate_recommendations(self, complexity: Dict, risks: List) -> List[str]:
         """基于分析生成建议"""
         recommendations = []
@@ -351,12 +470,31 @@ class SmartTestGenerator:
         expected_outcome = f"输出需符合 {analysis.get('name', '目标 skill')} 的目标结果"
         seed_input = triggers[0] if triggers else f"使用 {analysis.get('name', 'skill')}"
 
+        # 利用提取的命令和输出格式生成更有针对性的案例
+        commands = self._extract_commands()
+        output_format = self._extract_output_format()
+
+        # outcome_check：如果有具体命令，用命令语义描述而非泛化的触发词
+        if commands:
+            cmd = commands[0]
+            cmd_desc = cmd.get('description', cmd.get('subcmd', ''))
+            outcome_input = f"{seed_input}，执行 {cmd.get('subcmd', '')} 操作" if cmd.get('subcmd') else seed_input
+        else:
+            outcome_input = seed_input
+
+        # format_check：如果有 output_format，在 expected 中包含具体字段名
+        if output_format and output_format.get('fields'):
+            field_names = ', '.join(output_format['fields'][:5])
+            format_expected = f'输出格式结构清晰且包含关键字段：{field_names}'
+        else:
+            format_expected = '输出格式结构清晰且包含关键结果字段'
+
         return [
             self._make_case(
                 case_id='comp_outcome_0',
                 dimension='agent_comprehension',
                 type_='outcome_check',
-                input_=seed_input,
+                input_=outcome_input,
                 expected=expected_outcome,
                 description='验证结果是否匹配 Skill 声明意图',
                 priority='中',
@@ -367,7 +505,7 @@ class SmartTestGenerator:
                 dimension='agent_comprehension',
                 type_='format_check',
                 input_=f'{seed_input} --output-json',
-                expected='输出格式结构清晰且包含关键结果字段',
+                expected=format_expected,
                 description='验证输出格式与结构约束',
                 priority='中',
                 weight=0.9,
@@ -376,8 +514,54 @@ class SmartTestGenerator:
 
     def _generate_execution_cases(self, triggers: List[str], analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
         seed_input = triggers[0] if triggers else f"使用 {analysis.get('name', 'skill')}"
-        test_cases: List[Dict[str, Any]] = [
-            self._make_case(
+        test_cases: List[Dict[str, Any]] = []
+
+        # 利用提取的命令生成针对性案例
+        commands = self._extract_commands()
+
+        if commands:
+            # 为每个命令生成 normal_path 案例（每个命令最多 2 个案例）
+            cmd_case_count = 0
+            for i, cmd in enumerate(commands):
+                if cmd_case_count >= self.max_cases - 4:  # 留出空间给其他类型
+                    break
+                subcmd = cmd.get('subcmd', '')
+                cmd_desc = cmd.get('description', f'执行 {subcmd} 操作')
+                params = cmd.get('params', [])
+
+                # normal_path：用命令的语义描述
+                test_cases.append(self._make_case(
+                    case_id=f'exec_normal_{i}',
+                    dimension='execution_success',
+                    type_='normal_path',
+                    input_=f'{seed_input}，{cmd_desc}' if cmd_desc != subcmd else f'{seed_input} {subcmd}',
+                    expected='任务完成且输出符合预期',
+                    description=f'命令 {subcmd} 标准执行路径',
+                    priority='高',
+                    weight=1.1,
+                ))
+                cmd_case_count += 1
+
+                # boundary_case：缺少必填参数
+                required_params = [p for p in params if p.startswith('<')]
+                if required_params and cmd_case_count < self.max_cases - 4:
+                    test_cases.append(self._make_case(
+                        case_id=f'exec_boundary_cmd_{i}',
+                        dimension='execution_success',
+                        type_='boundary_case',
+                        input_=f'{seed_input} {subcmd}（不提供参数 {required_params[0]}）',
+                        expected=f'识别缺少参数 {required_params[0]} 并给出明确提示',
+                        description=f'命令 {subcmd} 缺少必填参数边界测试',
+                        priority='中',
+                        weight=1.0,
+                    ))
+                    cmd_case_count += 1
+
+                if cmd_case_count >= 6:  # 命令级案例上限
+                    break
+        else:
+            # 无提取命令时使用默认案例
+            test_cases.append(self._make_case(
                 case_id='exec_normal_0',
                 dimension='execution_success',
                 type_='normal_path',
@@ -386,18 +570,19 @@ class SmartTestGenerator:
                 description='标准输入执行路径',
                 priority='高',
                 weight=1.1,
-            ),
-            self._make_case(
-                case_id='exec_boundary_0',
-                dimension='execution_success',
-                type_='boundary_case',
-                input_='',
-                expected='识别空输入并给出明确提示',
-                description='空输入边界处理',
-                priority='中',
-                weight=1.0,
-            ),
-        ]
+            ))
+
+        # 始终添加空输入边界测试
+        test_cases.append(self._make_case(
+            case_id='exec_boundary_0',
+            dimension='execution_success',
+            type_='boundary_case',
+            input_='',
+            expected='识别空输入并给出明确提示',
+            description='空输入边界处理',
+            priority='中',
+            weight=1.0,
+        ))
 
         for risk in analysis['risks']:
             if risk['type'] == '认证':

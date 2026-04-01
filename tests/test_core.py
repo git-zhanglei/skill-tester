@@ -713,5 +713,175 @@ class TestReportBuilderEvalMd(unittest.TestCase):
             self.assertIn('test-skill', content)
 
 
+# ── 早期终止实时检测 ──
+
+class TestEarlyExitDetection(unittest.TestCase):
+    """测试 record 中的实时早期终止检测"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.cases_file = Path(self.tmp) / 'cases.json'
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _write_cases(self, cases):
+        data = {
+            'version': '3.0', 'skill_name': 'test',
+            'total': len(cases), 'cases': cases,
+            'execution': {'status': 'pending', 'progress': {'total': len(cases), 'completed': 0, 'passed': 0, 'failed': 0}},
+        }
+        self.cases_file.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+
+    def _make_case(self, case_id, status='pending', result_status=None, outcome=''):
+        c = {'id': case_id, 'dimension': 'execution_success', 'type': 'normal_path',
+             'input': 'test', 'expected': 'ok', 'description': 'test',
+             'weight': 1.0, 'status': status}
+        if result_status:
+            c['status'] = 'completed'
+            c['result'] = {'status': result_status, 'outcome': outcome}
+        return c
+
+    def test_no_early_exit_when_mixed_results(self):
+        cases = [
+            self._make_case('c0', result_status='passed'),
+            self._make_case('c1', result_status='failed', outcome='超时'),
+            self._make_case('c2', result_status='passed'),
+            self._make_case('c3'),  # pending
+        ]
+        self._write_cases(cases)
+        from parallel_test_runner import TestCoordinator
+        coord = TestCoordinator(str(self.cases_file))
+        result = coord.record('c3', 'failed', outcome='超时')
+        self.assertTrue(result['recorded'])
+        self.assertNotIn('early_exit_recommended', result)
+
+    def test_early_exit_on_3_consecutive_same_reason(self):
+        cases = [
+            self._make_case('c0', result_status='failed', outcome='Skill未被激活，子Agent未触发'),
+            self._make_case('c1', result_status='failed', outcome='目标Skill未触发，未激活'),
+            self._make_case('c2'),  # pending — will record as failed
+            self._make_case('c3'),  # pending
+        ]
+        self._write_cases(cases)
+        from parallel_test_runner import TestCoordinator
+        coord = TestCoordinator(str(self.cases_file))
+        result = coord.record('c2', 'failed', outcome='Skill未被激活')
+        self.assertTrue(result['recorded'])
+        self.assertTrue(result.get('early_exit_recommended', False))
+        self.assertIn('skill_not_activated', result.get('early_exit_reason', ''))
+
+
+# ── 多行 YAML 解析 ──
+
+class TestMultilineYaml(unittest.TestCase):
+    """测试 smart_test_generator 对多行 description 的解析"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_multiline_description_parsed(self):
+        content = '---\nname: test\ndescription: >\n  这是一个\n  多行描述\n---\n# T\n'
+        (self.skill / 'SKILL.md').write_text(content, encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        gen = SmartTestGenerator(self.skill)
+        gen.analyze()
+        self.assertIn('多行描述', gen.frontmatter.get('description', ''))
+
+    def test_quoted_description_with_colon(self):
+        content = '---\nname: test\ndescription: "用于查询天气：支持多城市"\n---\n# T\n'
+        (self.skill / 'SKILL.md').write_text(content, encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        gen = SmartTestGenerator(self.skill)
+        gen.analyze()
+        desc = gen.frontmatter.get('description', '')
+        self.assertIn('查询天气', desc)
+        self.assertIn('多城市', desc)
+
+
+# ── 命令提取 ──
+
+class TestCommandExtraction(unittest.TestCase):
+    """测试 smart_test_generator 从 SKILL.md 正文提取命令"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_extract_cli_commands(self):
+        content = (
+            '---\nname: test\ndescription: "测试"\n---\n# T\n'
+            '## 用法\n'
+            '```bash\n'
+            'python3 cli.py search <keyword>\n'
+            'python3 cli.py publish <product_id>\n'
+            '```\n'
+        )
+        (self.skill / 'SKILL.md').write_text(content, encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        gen = SmartTestGenerator(self.skill)
+        gen.analyze()
+        cmds = gen._extract_commands()
+        subcmds = [c.get('subcmd') for c in cmds]
+        self.assertIn('search', subcmds)
+        self.assertIn('publish', subcmds)
+
+    def test_extract_markdown_list_commands(self):
+        content = (
+            '---\nname: test\ndescription: "测试"\n---\n# T\n'
+            '## 命令\n'
+            '- `search <keyword>` — 搜索商品\n'
+            '- `publish <id>` — 发布商品\n'
+        )
+        (self.skill / 'SKILL.md').write_text(content, encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        gen = SmartTestGenerator(self.skill)
+        gen.analyze()
+        cmds = gen._extract_commands()
+        subcmds = [c.get('subcmd') for c in cmds]
+        self.assertIn('search', subcmds)
+        self.assertIn('publish', subcmds)
+
+
+# ── 修复建议 ──
+
+class TestFixSuggestions(unittest.TestCase):
+    """测试报告中的修复建议生成"""
+
+    def test_hit_rate_exact_match_suggestion(self):
+        from report_builder import ReportBuilder
+        r = {
+            'version': '3.0', 'skill_name': 'test', 'skill_path': '/tmp/test',
+            'safety': {'status': 'passed', 'issues': [], 'warnings': []},
+            'spec_score': 80.0,
+            'cases': [
+                {'id': 'h0', 'dimension': 'hit_rate', 'type': 'exact_match',
+                 'input': '搜索商品', 'status': 'completed',
+                 'result': {'status': 'failed', 'outcome': '未触发'}},
+            ],
+            'execution': {'total': 1, 'passed': 0, 'failed': 1, 'duration_seconds': 5.0},
+        }
+        builder = ReportBuilder(r)
+        fix = builder._suggest_fix(r['cases'][0])
+        self.assertIn('搜索商品', fix)
+
+    def test_execution_timeout_suggestion(self):
+        from report_builder import ReportBuilder
+        case = {'dimension': 'execution_success', 'type': 'normal_path',
+                'result': {'status': 'failed', 'outcome': '执行超时'}}
+        builder = ReportBuilder({'cases': [], 'safety': {}, 'spec_score': 0})
+        fix = builder._suggest_fix(case)
+        self.assertTrue('timeout' in fix.lower() or '超时' in fix)
+
+
 if __name__ == '__main__':
     unittest.main()
