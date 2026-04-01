@@ -162,7 +162,12 @@ class SafetyChecker:
     
     def _is_placeholder(self, value: str) -> bool:
         """检查值是否为占位符"""
-        placeholders = ['your_', 'xxx', 'yyy', 'placeholder', 'example', 'demo', 'test', 'fake']
+        placeholders = [
+            '"your', "'your", 'your_', 'your-',
+            'xxx', 'yyy', 'placeholder', 'example', 'demo',
+            'test', 'fake', 'replace', 'insert', 'put_',
+            'sk-xxx', 'sk-your', 'key_here', 'key-here',
+        ]
         return any(p in value.lower() for p in placeholders)
     
     def _is_example(self, value: str) -> bool:

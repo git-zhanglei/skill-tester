@@ -58,7 +58,11 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 1. **生成骨架**：`python3 {baseDir}/scripts/smart_test_generator.py <skill_path> --skeleton`
 2. **Agent 填充**：读目标 SKILL.md，为每个骨架案例填充 `input` 和 `expected`（参考 `hints` 但以自身理解为准），可增删案例，总数 ≤ 30
 3. **保存** JSON 到 `<workspace>/.skill-tester/test-cases/test-cases-{skill_name}-{YYYYMMDD}.json`（`<workspace>` 即 Agent 的工作目录，通常为 `~/.openclaw/workspace`）。骨架已包含 `version`/`cases`/`execution`，Agent 补充 `safety`/`spec_score`/`sandbox_check` 字段后验证：`python3 {baseDir}/scripts/test_cases_validator.py <cases_json>`
-4. **用户确认门控**：展示全部案例。`--yes` 跳过；`sandbox_incompatible` 须告知风险
+4. **用户确认门控（强制）**：在执行前**必须**将全部案例以列表形式展示给用户确认。格式要求：
+   - 按维度分组，每个案例显示：`id` | `type` | `input`（完整）| `expected`（完整）
+   - 末尾附总数统计
+   - 用户确认后才进入步骤 4；`--yes` 跳过此门控
+   - `sandbox_incompatible` 须同时告知风险
 
 四维度设计详见 [references/test-cases.md](./references/test-cases.md)。
 
@@ -73,7 +77,7 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 按 [references/executors.md](./references/executors.md) 执行：
 
 1. `--prepare` 生成执行计划（自动跳过已完成，支持断点续跑）
-2. 对每个 task 调用 `sessions_spawn`，传入纯净 `task_description`
+2. 对每个 task 调用 `sessions_spawn`，**`runTimeoutSeconds` 必须 ≥ 120**（默认值，勿手动缩短）
 3. **评估**：对比子 Agent 输出与案例 `expected`，参考 `evaluation_hint` 判断 passed/failed
 4. `--record` 记录结果（支持 `--outcome-file` 传长文本）
 5. **早期终止**：连续 3 个同因失败 → 停止，报告根因
@@ -85,6 +89,8 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>] [--json]
 ```
 安全 `failed` → 综合归零；任意维度 < 40 → 评级上限 ⭐⭐⭐。评分公式详见 [references/reviewers.md](./references/reviewers.md)。
+
+**报告展示（强制）**：将 `report_builder.py` 生成的 Markdown 报告**完整原文**展示给用户（不得摘取、总结或省略）。如有根因分析或优化建议，**追加在报告原文之后**，明确标注为 Agent 补充分析。
 
 `--eval-md` 生成 EVAL.md；`--json` 输出 JSON 供 CI/CD（配合 `ci_gate.py` 使用）。
 
