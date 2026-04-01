@@ -234,17 +234,7 @@ python3 scripts/spec_checker.py <skill_path> --json
   ],
   "notes": "result 对象在完成后包含 tokens_in 和 tokens_out 字段，记录该案例的 token 消耗",
   "execution": {
-    "status": "pending",
-    "parallel_degree": 4,
-    "multi_model": false,
-    "models_used": [],
-    "progress": {
-      "total": 30,
-      "completed": 0,
-      "passed": 0,
-      "failed": 0,
-      "timeout": 0
-    }
+    "status": "pending"
   }
 }
 ```

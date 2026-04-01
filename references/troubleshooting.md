@@ -39,7 +39,7 @@
 
 **进一步排查：**
 - 检查目标 Skill 依赖的外部 API 是否可用
-- 对于 I/O 密集型 Skill，适当降低并行度：`--parallel 2`
+- 对于 I/O 密集型 Skill，考虑串行执行以降低并发压力
 
 ---
 
@@ -109,9 +109,11 @@ python3 {baseDir}/scripts/report_builder.py results.json --output /path/to/repor
 
 **现象：** `agent_comprehension` 维度分数为 0，即使功能正常。
 
-**原因：** 目标 SKILL.md 没有明确描述执行步骤，导致"步骤遵循"测试无法生成。
+**可能原因：**
+- 子 Agent 启动异常，输出为空（非 Skill 问题）
+- 目标 Skill 的输出格式不明确，Agent 难以理解预期产物
 
-**建议：** 在目标 SKILL.md 中添加 `## 执行步骤` 章节，用有序列表描述步骤。
+**建议：** 在目标 SKILL.md 中明确描述预期输出格式和结果特征，便于 outcome_check 和 format_check 评估。
 
 ---
 

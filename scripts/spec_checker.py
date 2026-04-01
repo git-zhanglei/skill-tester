@@ -249,6 +249,13 @@ def check_has_workflow(skill_path: str) -> Dict:
     if any(re.search(p, body, re.IGNORECASE) for p in patterns):
         return _result('has_workflow', 'documentation', PASS, '有 Workflow / 执行步骤 章节')
 
+    # 检测编号步骤模式（如 "## 步骤 1："、"## Step 1:"）
+    step_pattern = r'##\s*(?:步骤|Step)\s*\d'
+    step_matches = re.findall(step_pattern, body, re.IGNORECASE)
+    if len(step_matches) >= 2:
+        return _result('has_workflow', 'documentation', PASS,
+                       f'有编号步骤式流程（检测到 {len(step_matches)} 个步骤）')
+
     needed, reasons = _should_require_workflow(fm, body)
     if needed:
         return _result('has_workflow', 'documentation', WARN,

@@ -41,7 +41,11 @@ class ReportBuilder:
     def __init__(self, results: Dict[str, Any]):
         self.results    = results
         self.skill_name = results.get('skill_name', 'unknown')
-        self.safety     = results.get('safety', {'status': 'unknown', 'issues': [], 'warnings': []})
+        _raw_safety = results.get('safety', {'status': 'unknown', 'issues': [], 'warnings': []})
+        # 兼容 Agent 传入 string（如 "warning"）或 dict
+        if isinstance(_raw_safety, str):
+            _raw_safety = {'status': _raw_safety, 'issues': [], 'warnings': []}
+        self.safety     = _raw_safety
         self.spec_score = float(results.get('spec_score', 0.0))
         self.cases      = results.get('cases', [])
         self.execution  = results.get('execution', {})

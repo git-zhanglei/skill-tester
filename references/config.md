@@ -1,101 +1,39 @@
 # skill-tester — 配置说明
 
-## 默认配置
+## 命令行参数（唯一配置方式）
 
-```yaml
-# 执行设置
-timeout_per_test: 60            # 每个测试案例超时（秒）
-max_test_cases: 30              # 最大测试案例总数（上限）
-auto_save_interval: 5           # 每完成 N 个自动保存一次
+所有配置通过命令行参数传入，无配置文件。
 
-# 安全检查
-skip_safety_check: false        # 跳过安全检查（不推荐）
-fail_on_critical: true          # 严重问题时终止测试
-
-# 多模型设置
-multi_model: false              # 是否启用多模型分发
-models: []                      # 指定模型列表（空=自动检测）
-model_distribution: "balanced"  # 分发策略：balanced / round-robin / dimension-based
-
-# 报告设置
-output_format: markdown         # markdown 或 json 或 both
-output_file: ""                 # 空=自动命名为 test-report-{skill}-{timestamp}
-include_passed_tests: true      # 报告中包含通过的测试
-include_model_comparison: true  # 多模型时包含对比报告
-
-# 评分权重（总和应为 100）
-weights:
-  hit_rate: 25
-  spec_compliance: 20
-  agent_comprehension: 25
-  execution_success: 30
-
-# 评分阈值
-thresholds:
-  excellent: 90
-  good: 70
-  acceptable: 40
-```
-
-## 配置优先级
-
-1. 命令行参数（最高）
-2. 环境变量
-3. 配置文件（`<workspace>/.skill-tester/config.yaml`）
-4. 默认值（最低）
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--timeout <n>` | 120 | 每个测试案例超时（秒） |
+| `--trials <n>` | 3 | critical 案例（exact_match/normal_path）重复次数 |
+| `--yes` | - | 跳过用户确认门控 |
+| `--dry-run` | - | 仅执行步骤 1-2.5（静态分析） |
+| `--skip-safety` | - | 跳过安全检查（仅调试用） |
+| `--output-json` | - | 同时输出 JSON 报告（CI/CD 用） |
+| `--eval-md` | - | 写入 EVAL.md 到目标 Skill 目录 |
+| `--dimension <dim>` | - | 只执行指定维度（切片测试） |
 
 ## 环境变量
 
-```bash
-# 执行
-SKILL_TESTER_TIMEOUT=60
-SKILL_TESTER_MAX_CASES=30
+| 变量 | 说明 |
+|------|------|
+| `OPENCLAW_WORKSPACE` | 工作目录（默认 `~/.openclaw/workspace`），影响测试产物存储位置 |
 
-# 多模型
-SKILL_TESTER_MULTI_MODEL=false
-SKILL_TESTER_MODELS="model-a,model-b"
+## 评分权重（固定）
 
-# 报告
-SKILL_TESTER_FORMAT=markdown
-SKILL_TESTER_OUTPUT=""
+| 维度 | 权重 | 说明 |
+|------|------|------|
+| 触发命中率 | 25% | 触发词不重要的工具类 Skill 可考虑降低 |
+| Skill规范程度 | 20% | 静态分析 |
+| Agent理解度 | 25% | 结果导向评估 |
+| 执行成功率 | 30% | 核心能力，建议不低于 25% |
 
-# 安全
-SKILL_TESTER_SKIP_SAFETY=false
-```
+权重当前为代码硬编码（`constants.py`），暂不支持运行时调整。
 
-## 自定义配置文件
+## 早期终止
 
-```yaml
-# <workspace>/.skill-tester/config.yaml
-timeout_per_test: 120
-multi_model: true
+连续 3 个案例因相同原因失败时，`--finalize` 会建议终止。Agent 在执行过程中也应自行检测并停止。
 
-weights:
-  hit_rate: 25
-  spec_compliance: 20
-  agent_comprehension: 25
-  execution_success: 30
-
-thresholds:
-  excellent: 90
-  good: 70
-```
-
-## 评分权重说明
-
-权重决定各维度在综合评分中的贡献比例，**四个权重之和必须为 100**。
-
-| 维度 | 默认权重 | 调整建议 |
-|------|----------|--------|
-| `hit_rate` | 25 | 触发词不重要的工具类 Skill 可降低 |
-| `spec_compliance` | 20 | 规范要求严格时可提高 |
-| `agent_comprehension` | 25 | 复杂指令 Skill 可提高 |
-| `execution_success` | 30 | 核心能力，建议不低于 25 |
-
-## 模型分发策略
-
-| 策略 | 说明 | 适用场景 |
-|------|------|--------|
-| `balanced` | 均匀分配测试案例到各模型 | 通用（默认） |
-| `round-robin` | 轮询分配，每个案例依次换模型 | 对比各模型一致性 |
-| `dimension-based` | 按测试维度分组分配不同模型 | 专项能力对比 |
+根因分类：`skill_not_activated`、`timeout`、`spawn_unavailable`、`dependency_missing`。

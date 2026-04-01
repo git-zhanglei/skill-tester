@@ -438,10 +438,44 @@ class TestCoordinator:
                 verify_cmd, shell=True, capture_output=True, text=True, timeout=10
             )
             output = result.stdout + result.stderr
-            if verify_expect and verify_expect in output:
-                target['status'] = 'verified'
+            if verify_expect:
+                # 支持三种匹配模式：
+                # 1. 纯字符串 in 匹配
+                # 2. 正则匹配（verify_expect 含 .* 或 \d 等元字符时）
+                # 3. JSON 值匹配（如 "ak_configured": true）
+                import re
+                matched = False
+                # 先尝试直接包含
+                if verify_expect in output:
+                    matched = True
+                # 再尝试正则
+                if not matched:
+                    try:
+                        if re.search(verify_expect, output):
+                            matched = True
+                    except re.error:
+                        pass
+                # 再尝试 JSON 值匹配：将 "key.*true" 转为检查 JSON 中 key=true
+                if not matched:
+                    try:
+                        import json as _json
+                        parsed = _json.loads(output.strip()) if output.strip().startswith('{') else None
+                        if parsed and isinstance(parsed, dict):
+                            # 从 verify_expect 提取 key 和 expected value
+                            kv_match = re.match(r'^(\w+).*?(true|false|configured|ok)$',
+                                                verify_expect, re.IGNORECASE)
+                            if kv_match:
+                                key, val = kv_match.group(1), kv_match.group(2).lower()
+                                actual = parsed.get(key) if key in parsed else \
+                                         parsed.get('data', {}).get(key)
+                                if actual is not None:
+                                    matched = str(actual).lower() == val
+                    except Exception:
+                        pass
+                target['status'] = 'verified' if matched else 'failed'
             else:
-                target['status'] = 'failed'
+                # 无 verify_expect，命令成功执行即为 verified
+                target['status'] = 'verified' if result.returncode == 0 else 'failed'
         except subprocess.TimeoutExpired:
             target['status'] = 'failed'
             output = 'TIMEOUT'

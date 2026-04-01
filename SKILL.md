@@ -9,6 +9,8 @@ source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-
 
 对指定的 OpenClaw Skill 进行四维度质量评估，输出可量化的认证报告。
 
+> `{baseDir}` = 本 Skill 的安装目录（即包含此 SKILL.md 的目录）。
+
 ## Guardrails
 
 - **不测试生产数据**：涉及真实用户数据时拒绝执行
@@ -24,6 +26,7 @@ source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-
 - `--trials <n>`：critical 案例重复次数（默认 3）
 - `--output-json`：同时输出 JSON（CI/CD 用） | `--eval-md`：写入 EVAL.md
 - `--dry-run`：仅步骤 1-2.5 | `--skip-safety`：跳过安全检查（调试用）
+- 环境变量 `OPENCLAW_WORKSPACE`：工作目录（默认 `~/.openclaw/workspace`），影响测试产物存储
 
 ## 步骤 1：安全检查（门控）
 
@@ -51,20 +54,7 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 **2.5.1 确认 Skill 已安装**（必须）：检查目标 Skill 是否出现在当前 `available_skills` 中。若不在，**停止测试**并告知用户：
 > ⚠️ 目标 Skill `{name}` 未被 OpenClaw 发现。请先安装到 `~/.openclaw/skills/` 或 `<workspace>/skills/`，然后重新开始测试。
 
-**2.5.2 依赖项分析**（`sandbox_incompatible` 时）：阅读目标 SKILL.md + `sandbox_checker` 输出，提取结构化依赖清单，填入案例 JSON 的 `dependencies.items`：
-```json
-{
-  "id": "ak",
-  "name": "ALI_1688_AK",
-  "type": "env_var",
-  "description": "1688 API Access Key，用于调用所有业务接口",
-  "configure_hint": "执行 cli.py configure YOUR_AK 或 export ALI_1688_AK=xxx",
-  "verify_command": "python3 {baseDir}/cli.py check",
-  "verify_expect": "configured",
-  "status": "unverified"
-}
-```
-每个依赖须有 `verify_command`（可执行的验证命令）和 `verify_expect`（输出中应包含的关键词）。
+**2.5.2 依赖项分析**（`sandbox_incompatible` 时）：阅读目标 SKILL.md + `sandbox_checker` 输出，提取结构化依赖清单，填入案例 JSON 的 `dependencies.items`。每个依赖须有 `verify_command` 和 `verify_expect`。格式详见 [test-cases.md](./references/test-cases.md)。
 
 **2.5.3 向用户展示依赖状态**：列出所有依赖及其当前状态，告知用户：
 - 测试将分两阶段：先测无依赖场景（Phase A），再测有依赖场景（Phase C）
@@ -94,39 +84,23 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ## 步骤 4：执行测试案例
 
-执行流程由案例 JSON 中的 `phases` 状态机驱动。Agent 每次操作后通过 CLI 更新 JSON，确保可断点续跑。
+执行流程由案例 JSON 中的 `phases` 状态机驱动（Phase A → B → C），支持断点续跑。
 
-### Phase A：无依赖测试
+- **sandbox_compatible** 的 Skill：只有 Phase A，直接执行所有案例
+- **sandbox_incompatible** 的 Skill：Phase A（无依赖测试）→ Phase B（依赖配置门控，向用户收集配置）→ Phase C（有依赖测试）
 
-1. `--prepare --phase phase_a` 获取任务列表
-2. 逐个执行 + `--record` 记录
-3. 全部完成后 `--advance-phase` 推进状态
+每个案例通过 `sessions_spawn` 发给子 Agent 执行，主 Agent 对比输出与 expected 评估结果，再用 `--record` 记录。
 
-### Phase B：依赖配置门控
+**早期终止**：连续 3 个同因失败 → 停止执行，报告根因。
 
-1. `--phase-status` 确认进入 Phase B
-2. `--verify-all-deps` 检查依赖状态
-3. 未通过的依赖 → 向用户展示 `configure_hint`，等待用户配置
-4. 用户配置后 → `--verify-dep <id>` 逐项验证
-5. 全部通过 → `--advance-phase` 进入 Phase C
-6. 用户选择跳过 → Phase C 案例标记为 `skipped`，直接进入步骤 5
-
-### Phase C：有依赖测试
-
-1. `--prepare --phase phase_c` 获取任务列表
-2. 逐个执行 + `--record` 记录
-3. 全部完成后 `--advance-phase` 完成所有阶段
-
-**早期终止**：任意 phase 中连续 3 个同因失败 → 停止当前 phase，报告根因。
-
-按 [references/executors.md](./references/executors.md) 了解详细命令用法。
+详细命令用法（prepare/record/advance-phase/verify-dep 等）见 [references/executors.md](./references/executors.md)。
 
 ## 步骤 5：生成报告
 
 ```bash
 python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>] [--json]
 ```
-安全 `failed` → 综合归零；任意维度 < 40 → 评级上限 ⭐⭐⭐。评分公式详见 [references/reviewers.md](./references/reviewers.md)。
+评分公式与特殊规则详见 [references/reviewers.md](./references/reviewers.md)。
 
 **报告展示（强制）**：将 `report_builder.py` 生成的 Markdown 报告**完整原文**展示给用户（不得摘取、总结或省略）。如有根因分析或优化建议，**追加在报告原文之后**，明确标注为 Agent 补充分析。
 
@@ -147,11 +121,10 @@ python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>
 
 ## 参考文档（按需加载）
 
-- **步骤 3 详解** → [test-cases.md](./references/test-cases.md)：四维度案例格式与示例
-- **步骤 4 详解** → [executors.md](./references/executors.md)：执行命令、断点续跑、错误处理
+- **步骤 3 详解** → [test-cases.md](./references/test-cases.md)：四维度案例格式、依赖项 JSON 结构与示例
+- **步骤 4 详解** → [executors.md](./references/executors.md)：执行命令、断点续跑、分阶段流程
 - **步骤 5 详解** → [reviewers.md](./references/reviewers.md)：评分公式与评审逻辑
-- **报告格式** → [report-template.md](./references/report-template.md)：报告结构与输出样例
 - **安全检查规则** → [safety-checker.md](./references/safety-checker.md)：步骤 1 的检查规则详情
 - **CI/CD 集成** → [ci-cd.md](./references/ci-cd.md)：`ci_gate.py` 用法和 GitHub Actions 示例
 - **常见问题** → [troubleshooting.md](./references/troubleshooting.md)：执行失败排查
-- **高级配置** → [config.md](./references/config.md)：超时、早期终止等参数调整
+- **参数配置** → [config.md](./references/config.md)：命令行参数、评分权重
