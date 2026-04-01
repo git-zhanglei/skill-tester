@@ -7,6 +7,35 @@ import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+from frontmatter_parser import parse_skill_md
+from constants import VERSION
+
+
+SKELETON_DESCRIPTIONS = {
+    'exact_match': '精确触发词命中测试',
+    'fuzzy_match': '触发词同义词/衍生词命中测试',
+    'negative_test': '非同义指令误命中防护测试',
+    'outcome_check': '验证结果是否匹配 Skill 声明意图',
+    'format_check': '验证输出格式与结构约束',
+    'normal_path': '标准输入执行路径',
+    'boundary_case': '边界输入处理',
+    'error_handling': '异常处理能力',
+    'adversarial': '对抗性测试',
+    'idempotency_check': '幂等性测试',
+}
+
+FILL_INSTRUCTIONS = (
+    'Agent 须读取目标 SKILL.md 后，为每个骨架案例填充 input 和 expected 字段。\n'
+    '- hit_rate/exact_match: input 应是 SKILL.md 中声明的精确触发词或示例输入\n'
+    '- hit_rate/fuzzy_match: input 应是触发词的自然语言变体（口语化、同义替换、加礼貌前缀）\n'
+    '- hit_rate/negative_test: input 应是与 Skill 无关但容易混淆的请求\n'
+    '- agent_comprehension: input 应是触发 Skill 核心功能的请求，expected 描述预期产物\n'
+    '- execution_success: input 应是具体业务场景的自然语言请求\n'
+    '- adversarial: input 应是尝试突破 Skill 边界的请求（越权、注入、异常格式）\n'
+    '- idempotency_check: input 应与 exec_normal_0 相同\n'
+    'hints 中的 trigger_phrases_detected / commands_detected / output_format_detected 是脚本提取的线索，仅供参考。'
+)
+
 
 class SmartTestGenerator:
     """基于 skill 分析生成智能测试用例"""
@@ -41,18 +70,20 @@ class SmartTestGenerator:
         """带启发式的深度分析"""
         if not self.skill_md.exists():
             raise FileNotFoundError(f"SKILL.md 未找到于 {self.skill_path}")
-        
-        content = self.skill_md.read_text(encoding='utf-8')
-        
-        # 解析 frontmatter 和 body
-        self._parse_content(content)
-        
+
+        # 使用统一的 frontmatter 解析器
+        _, self.frontmatter, self.body = parse_skill_md(str(self.skill_path))
+
+        # 缓存命令提取和输出格式提取结果
+        self._commands_cache = self._extract_commands()
+        self._output_format_cache = self._extract_output_format()
+
         # 分析复杂度
         complexity = self._analyze_complexity()
-        
+
         # 识别风险区域
         risks = self._identify_risks()
-        
+
         return {
             'name': self.frontmatter.get('name', 'unknown'),
             'description': self.frontmatter.get('description', ''),
@@ -60,57 +91,6 @@ class SmartTestGenerator:
             'risks': risks,
             'recommendations': self._generate_recommendations(complexity, risks)
         }
-    
-    def _parse_content(self, content: str):
-        """解析 frontmatter 和 body，支持多行 YAML 值"""
-        if not content.startswith('---'):
-            self.body = content
-            return
-
-        parts = content.split('---', 2)
-        if len(parts) < 3:
-            self.body = content
-            return
-
-        raw_fm = parts[1].strip()
-        self.body = parts[2].strip()
-
-        # 简易 YAML 解析（不引入 pyyaml 依赖）
-        current_key = None
-        current_value_lines: list = []
-
-        for line in raw_fm.split('\n'):
-            # 续行（以空格/tab开头，或空行在多行值中）
-            if current_key and (line.startswith(' ') or line.startswith('\t')):
-                current_value_lines.append(line.strip())
-                continue
-
-            # 新键值对
-            if ':' in line:
-                # 先保存上一个键
-                if current_key:
-                    self.frontmatter[current_key] = ' '.join(current_value_lines).strip().strip('"\'')
-
-                key, _, value = line.partition(':')
-                current_key = key.strip()
-                value = value.strip()
-
-                # 处理引号包裹的值（可能含冒号）
-                if value.startswith('"') and value.endswith('"'):
-                    current_value_lines = [value[1:-1]]
-                elif value.startswith("'") and value.endswith("'"):
-                    current_value_lines = [value[1:-1]]
-                elif value in ('|', '>', '|+', '>-', '|-', '>+'):
-                    # YAML 块标量，后续行是值
-                    current_value_lines = []
-                elif value:
-                    current_value_lines = [value]
-                else:
-                    current_value_lines = []
-
-        # 保存最后一个键
-        if current_key:
-            self.frontmatter[current_key] = ' '.join(current_value_lines).strip().strip('"\'')
     
     def _analyze_complexity(self) -> Dict[str, Any]:
         """分析 skill 复杂度"""
@@ -214,6 +194,24 @@ class SmartTestGenerator:
         cmd_list_pattern = r'[-*]\s*`([^`]+)`\s*[—\-:：]\s*(.+)'
         for match in re.finditer(cmd_list_pattern, self.body):
             cmd_text = match.group(1).strip()
+            # 过滤不像命令的匹配
+            # 跳过格式标记（如 %c、%t）、纯符号、太短的
+            if re.match(r'^[%$@#]', cmd_text):
+                continue
+            if len(cmd_text) < 2:
+                continue
+            # 跳过以 - 或 -- 开头的（这是参数，不是命令）
+            if cmd_text.startswith('--') or cmd_text.startswith('-'):
+                continue
+            # 跳过太短的单词（如 "long"、"all"）
+            if len(cmd_text.split()) == 1 and len(cmd_text) < 4:
+                continue
+            # 跳过纯参数模板（整体就是 <placeholder>，没有命令词在前面）
+            if cmd_text.startswith('<') and '>' in cmd_text:
+                continue
+            # 跳过纯大写无动词的（如 "Temperature"、"Humidity"）— 这些通常是字段名而非命令
+            if re.match(r'^[A-Z][a-z]+$', cmd_text) and not re.search(r'(get|set|run|list|show|search|create|delete|update|check)', cmd_text, re.IGNORECASE):
+                continue
             desc = match.group(2).strip()
             parts = cmd_text.split()
             commands.append({
@@ -224,13 +222,27 @@ class SmartTestGenerator:
             })
 
         # 模式 3：表格中的命令（如 | search | 搜索商品 | keyword |）
-        table_rows = re.findall(r'\|([^|]+)\|([^|]+)\|([^|]*)\|', self.body)
+        # 先移除 backtick 内的内容，避免误匹配 pipe 分隔的枚举值（如 `short|medium|long`）
+        body_no_backticks = re.sub(r'`[^`]+`', '', self.body)
+        table_rows = re.findall(r'\|([^|]+)\|([^|]+)\|([^|]*)\|', body_no_backticks)
         for row in table_rows:
             cells = [c.strip() for c in row]
             # 跳过表头和分隔行
-            if cells[0].startswith('-') or cells[0].lower() in ('命令', 'command', '子命令', '操作'):
+            if cells[0].startswith('-') or cells[0].lower() in ('命令', 'command', '子命令', '操作', 'script', 'usage', 'field', 'format', '字段', '格式', 'option', 'flag', 'parameter', '参数'):
                 continue
-            if cells[0] and not cells[0].startswith('-'):
+            # 跳过太短或纯格式标记
+            if len(cells[0]) < 2 or re.match(r'^[%$@#]', cells[0]):
+                continue
+            # 跳过以 - 或 -- 开头的（这是参数，不是命令）
+            if cells[0].startswith('--') or cells[0].startswith('-'):
+                continue
+            # 跳过太短的单词（如 "long"、"all"）
+            if len(cells[0].split()) == 1 and len(cells[0]) < 4:
+                continue
+            # 跳过纯参数模板（整体就是 <placeholder>，没有命令词在前面）
+            if cells[0].startswith('<') and '>' in cells[0]:
+                continue
+            if cells[0]:
                 commands.append({
                     'subcmd': cells[0],
                     'description': cells[1] if len(cells) > 1 else '',
@@ -282,7 +294,11 @@ class SmartTestGenerator:
         return recommendations
     
     def generate(self) -> List[Dict[str, Any]]:
-        """按维度分类生成测试用例（hit_rate / agent_comprehension / execution_success）"""
+        """按维度分类生成测试用例（hit_rate / agent_comprehension / execution_success）
+
+        [DEPRECATED] 推荐使用 generate_skeleton() + Agent 填充模式。
+        此方法保留用于向后兼容和调试。
+        """
         analysis = self.analyze()
         triggers = self._extract_trigger_phrases()
 
@@ -310,8 +326,9 @@ class SmartTestGenerator:
         description: str,
         priority: str = '中',
         weight: float = 1.0,
+        multi_trial: bool = False,
     ) -> Dict[str, Any]:
-        return {
+        case: Dict[str, Any] = {
             'id': case_id,
             'dimension': dimension,
             'type': type_,
@@ -322,6 +339,9 @@ class SmartTestGenerator:
             'weight': weight,
             'status': 'pending',
         }
+        if multi_trial:
+            case['multi_trial'] = True
+        return case
 
     def _extract_trigger_phrases(self) -> List[str]:
         """从 frontmatter.description 中提取触发词/短语"""
@@ -358,15 +378,53 @@ class SmartTestGenerator:
             if phrase and phrase not in cleaned:
                 cleaned.append(phrase)
 
+        # 从 SKILL.md 正文的 "When to Use" / "Usage" / "示例" 等章节提取引号内的示例输入
+        if not cleaned:
+            # 查找包含使用示例的章节
+            use_section = re.search(
+                r'(?:When to Use|使用场景|触发|Usage|用法|示例)[^#]*?(?=\n#|\Z)',
+                self.body, re.IGNORECASE | re.DOTALL
+            )
+            if use_section:
+                section_text = use_section.group(0)
+                # 提取引号内的示例（如 "What's the weather?"）
+                for pattern in [r'\u201c([^\u201d]{4,60})\u201d', r'"([^"]{4,60})"', r'\u300c([^\u300d]{4,60})\u300d']:
+                    for match in re.findall(pattern, section_text):
+                        cleaned_match = self._clean_phrase(match)
+                        if cleaned_match and cleaned_match not in cleaned:
+                            cleaned.append(cleaned_match)
+                # 也提取列表项中的短语（如 - Temperature in [city]）
+                for match in re.findall(r'[-*]\s+"?([^"\n]{4,60})"?', section_text):
+                    # 跳过以箭头（→）标注的"不要用"的示例
+                    if '\u2192' in match or '\u279c' in match:
+                        continue
+                    cleaned_match = self._clean_phrase(match)
+                    if cleaned_match and cleaned_match not in cleaned:
+                        cleaned.append(cleaned_match)
+
+        # 另外，从 description 中提取 "Use when" 后面的关键词（如 "weather, temperature, forecasts"）
+        if not cleaned:
+            use_when = re.search(
+                r'(?:Use when|用于|用来)[:\s]*([^.。!！?？]+)',
+                desc, re.IGNORECASE
+            )
+            if use_when:
+                context = use_when.group(1)
+                # 提取逗号分隔的关键词短语
+                for seg in re.split(r',\s*|\s+or\s+|\s+and\s+|\u3001', context):
+                    seg = self._clean_phrase(seg)
+                    if seg and len(seg) > 2 and seg not in cleaned:
+                        cleaned.append(seg)
+
         if not cleaned:
             fallback = self._clean_phrase(self.frontmatter.get('name', 'skill'))
             if fallback:
                 cleaned = [fallback]
-        return cleaned[:4]
+        return cleaned[:6]
 
     def _clean_phrase(self, text: str) -> str:
         text = re.sub(r'\s+', ' ', text).strip()
-        return text.strip('，,。.!！？?；;:：[](){}')
+        return text.strip('，,。.!！？?；;:：')
 
     def _derive_trigger_variants(self, trigger: str) -> List[str]:
         """生成触发词同义/衍生变体，用于 hit_rate 模糊命中测试"""
@@ -375,11 +433,34 @@ class SmartTestGenerator:
         if not base:
             return variants
 
-        # 1) 礼貌前后缀（衍生词）
-        for prefix in ('请', '请帮我', '帮我', '麻烦'):
-            variants.append(f'{prefix}{base}')
-        for suffix in ('一下', '看看', '可以吗'):
-            variants.append(f'{base}{suffix}')
+        # 检测语言：中文 vs 英文
+        has_cjk = bool(re.search(r'[\u4e00-\u9fff]', base))
+
+        # 1) 根据语言选择礼貌前后缀
+        if has_cjk:
+            # 中文：加礼貌前后缀
+            for prefix in ('请', '请帮我', '帮我', '麻烦'):
+                variants.append(f'{prefix}{base}')
+            for suffix in ('一下', '看看', '可以吗'):
+                variants.append(f'{base}{suffix}')
+        else:
+            # 英文：智能变体
+            lower = base.lower().strip('?!.')
+            # 如果已经是问句（以 what/how/when/where/will/is/can 等开头），做问句变体
+            if re.match(r'^(what|how|when|where|will|is|are|can|do|does)\b', lower, re.IGNORECASE):
+                variants.extend([
+                    f'Hey, {lower}?',
+                    f'Could you tell me, {lower}?',
+                    f'I need to know: {lower}',
+                ])
+            else:
+                # 陈述/命令式，加前缀
+                variants.extend([
+                    f'Please {lower}',
+                    f'Can you {lower}?',
+                    f'I want to {lower}',
+                    f'Help me {lower}',
+                ])
 
         # 2) 同义词替换
         lower = base.lower()
@@ -430,6 +511,7 @@ class SmartTestGenerator:
                 description='精确触发词命中测试',
                 priority='高',
                 weight=1.0,
+                multi_trial=True,
             ))
 
         fuzzy_candidates: List[str] = []
@@ -470,15 +552,34 @@ class SmartTestGenerator:
         expected_outcome = f"输出需符合 {analysis.get('name', '目标 skill')} 的目标结果"
         seed_input = triggers[0] if triggers else f"使用 {analysis.get('name', 'skill')}"
 
-        # 利用提取的命令和输出格式生成更有针对性的案例
-        commands = self._extract_commands()
-        output_format = self._extract_output_format()
+        # 利用缓存的命令和输出格式生成更有针对性的案例
+        commands = getattr(self, '_commands_cache', None) or self._extract_commands()
+        output_format = getattr(self, '_output_format_cache', None) or self._extract_output_format()
 
-        # outcome_check：如果有具体命令，用命令语义描述而非泛化的触发词
-        if commands:
-            cmd = commands[0]
-            cmd_desc = cmd.get('description', cmd.get('subcmd', ''))
-            outcome_input = f"{seed_input}，执行 {cmd.get('subcmd', '')} 操作" if cmd.get('subcmd') else seed_input
+        # 应用与 execution_cases 相同的质量检查
+        quality_commands = []
+        for cmd in commands:
+            subcmd = cmd.get('subcmd', '')
+            if not subcmd or len(subcmd) < 2:
+                continue
+            if subcmd.startswith('-') or subcmd.startswith('%'):
+                continue
+            if subcmd.lower() in ('usage', 'help', 'version', 'long', 'short', 'all', 'none', 'true', 'false',
+                                  'medium', 'small', 'large', 'auto', 'off', 'always', 'never', 'yes', 'no',
+                                  'default', 'custom', 'enabled', 'disabled'):
+                continue
+            quality_commands.append(cmd)
+
+        # outcome_check：用命令描述或触发词来生成输入，而非拼接 Skill name
+        if quality_commands:
+            cmd = quality_commands[0]
+            cmd_desc = cmd.get('description', '')
+            if cmd_desc:
+                outcome_input = cmd_desc
+            elif cmd.get('subcmd'):
+                outcome_input = f'执行 {cmd["subcmd"]} 操作'
+            else:
+                outcome_input = seed_input
         else:
             outcome_input = seed_input
 
@@ -504,7 +605,7 @@ class SmartTestGenerator:
                 case_id='comp_format_0',
                 dimension='agent_comprehension',
                 type_='format_check',
-                input_=f'{seed_input} --output-json',
+                input_=seed_input,
                 expected=format_expected,
                 description='验证输出格式与结构约束',
                 priority='中',
@@ -516,29 +617,50 @@ class SmartTestGenerator:
         seed_input = triggers[0] if triggers else f"使用 {analysis.get('name', 'skill')}"
         test_cases: List[Dict[str, Any]] = []
 
-        # 利用提取的命令生成针对性案例
-        commands = self._extract_commands()
+        # 利用缓存的命令生成针对性案例
+        commands = getattr(self, '_commands_cache', None) or self._extract_commands()
 
-        if commands:
+        # 质量检查：过滤掉可疑命令
+        quality_commands = []
+        for cmd in commands:
+            subcmd = cmd.get('subcmd', '')
+            # 跳过无意义的子命令
+            if not subcmd or len(subcmd) < 2:
+                continue
+            if subcmd.startswith('-') or subcmd.startswith('%'):
+                continue
+            if subcmd.lower() in ('usage', 'help', 'version', 'long', 'short', 'all', 'none', 'true', 'false',
+                                  'medium', 'small', 'large', 'auto', 'off', 'always', 'never', 'yes', 'no',
+                                  'default', 'custom', 'enabled', 'disabled'):
+                continue
+            quality_commands.append(cmd)
+
+        # 只有至少 1 个高质量命令时才用命令级案例
+        if quality_commands:
             # 为每个命令生成 normal_path 案例（每个命令最多 2 个案例）
             cmd_case_count = 0
-            for i, cmd in enumerate(commands):
+            for i, cmd in enumerate(quality_commands):
                 if cmd_case_count >= self.max_cases - 4:  # 留出空间给其他类型
                     break
                 subcmd = cmd.get('subcmd', '')
                 cmd_desc = cmd.get('description', f'执行 {subcmd} 操作')
                 params = cmd.get('params', [])
 
-                # normal_path：用命令的语义描述
+                # normal_path：生成自然语言请求而非直接拼接命令名
+                if cmd_desc and cmd_desc != subcmd:
+                    natural_input = cmd_desc  # 用命令的自然语言描述
+                else:
+                    natural_input = f'使用 {self.frontmatter.get("name", "skill")} 执行 {subcmd}'
                 test_cases.append(self._make_case(
                     case_id=f'exec_normal_{i}',
                     dimension='execution_success',
                     type_='normal_path',
-                    input_=f'{seed_input}，{cmd_desc}' if cmd_desc != subcmd else f'{seed_input} {subcmd}',
+                    input_=natural_input,
                     expected='任务完成且输出符合预期',
                     description=f'命令 {subcmd} 标准执行路径',
                     priority='高',
                     weight=1.1,
+                    multi_trial=True,
                 ))
                 cmd_case_count += 1
 
@@ -560,7 +682,7 @@ class SmartTestGenerator:
                 if cmd_case_count >= 6:  # 命令级案例上限
                     break
         else:
-            # 无提取命令时使用默认案例
+            # fallback：基于触发词的通用案例
             test_cases.append(self._make_case(
                 case_id='exec_normal_0',
                 dimension='execution_success',
@@ -570,6 +692,7 @@ class SmartTestGenerator:
                 description='标准输入执行路径',
                 priority='高',
                 weight=1.1,
+                multi_trial=True,
             ))
 
         # 始终添加空输入边界测试
@@ -632,8 +755,118 @@ class SmartTestGenerator:
                 weight=1.0,
             ))
 
+        # 幂等性测试：取第一个 normal_path 的输入，标记为 idempotency
+        if test_cases:
+            first_normal = next((c for c in test_cases if c.get('type') == 'normal_path'), None)
+            if first_normal:
+                test_cases.append(self._make_case(
+                    case_id='exec_idempotency_0',
+                    dimension='execution_success',
+                    type_='idempotency_check',
+                    input_=first_normal['input'],
+                    expected='两次执行结果一致，无副作用',
+                    description='幂等性测试：相同输入两次执行，验证结果一致性',
+                    priority='中',
+                    weight=1.0,
+                    multi_trial=True,
+                ))
+
         test_cases.extend(self._generate_adversarial(analysis))
         return test_cases
+
+    def generate_skeleton(self) -> Dict[str, Any]:
+        """
+        生成案例骨架：提供维度结构和格式模板，
+        input/expected 留给 Agent 读完目标 SKILL.md 后填充。
+
+        返回包含：
+        - analysis: Skill 分析结果（复杂度、风险、提取到的线索）
+        - skeleton_cases: 骨架案例列表（有 id/dimension/type/priority/weight，input/expected 为空或提示）
+        - hints: 给 Agent 的填充指引
+        """
+        analysis = self.analyze()
+        trigger_hints = self._extract_trigger_phrases()
+        commands = self._commands_cache if hasattr(self, '_commands_cache') else self._extract_commands()
+        output_format = self._output_format_cache if hasattr(self, '_output_format_cache') else self._extract_output_format()
+
+        # 案例定义表：(id_prefix, count, dimension, type, defaults)
+        CASE_DEFS = [
+            # hit_rate
+            ('hit_exact',    2, 'hit_rate',            'exact_match',    {'expected': 'activate', 'priority': '高', 'weight': 1.0, 'multi_trial': True}),
+            ('hit_fuzzy',    3, 'hit_rate',            'fuzzy_match',    {'expected': 'activate', 'priority': '中', 'weight': 1.0}),
+            ('hit_negative', 2, 'hit_rate',            'negative_test',  {'expected': 'not_activate', 'priority': '高', 'weight': 0.8}),
+            # agent_comprehension
+            ('comp_outcome', 1, 'agent_comprehension', 'outcome_check',  {'priority': '中', 'weight': 1.0}),
+            ('comp_format',  1, 'agent_comprehension', 'format_check',   {'priority': '中', 'weight': 0.9}),
+            # execution_success
+            ('exec_normal',  'dynamic', 'execution_success', 'normal_path',    {'priority': '高', 'weight': 1.1, 'multi_trial': True}),
+            ('exec_boundary', 1, 'execution_success', 'boundary_case',  {'priority': '中', 'weight': 1.0}),
+            ('exec_error',   'dynamic', 'execution_success', 'error_handling', {'priority': '中', 'weight': 1.0}),
+            ('exec_adv',     2, 'execution_success',  'adversarial',    {'priority': '中', 'weight': 0.8}),
+            ('exec_idempotency', 1, 'execution_success', 'idempotency_check', {'expected': '两次执行结果一致，无副作用', 'priority': '中', 'weight': 1.0, 'multi_trial': True}),
+        ]
+
+        skeleton_cases = []
+        for prefix, count, dim, typ, defaults in CASE_DEFS:
+            # 动态数量处理
+            if count == 'dynamic':
+                if typ == 'normal_path':
+                    count = min(max(len(commands), 1), 3)
+                elif typ == 'error_handling':
+                    count = self._count_error_cases(analysis)
+
+            for i in range(count):
+                case_id = f'{prefix}_{i}' if count > 1 else prefix + '_0'
+                case = {
+                    'id': case_id,
+                    'dimension': dim,
+                    'type': typ,
+                    'input': '',
+                    'expected': defaults.get('expected', ''),
+                    'description': SKELETON_DESCRIPTIONS.get(typ, ''),
+                    'priority': defaults.get('priority', '中'),
+                    'weight': defaults.get('weight', 1.0),
+                    'status': 'pending',
+                }
+                if defaults.get('multi_trial'):
+                    case['multi_trial'] = True
+                skeleton_cases.append(case)
+
+        # 过滤低质量触发词线索
+        quality_triggers = []
+        for t in trigger_hints:
+            # 跳过太短（< 3 字符）或太长（> 50 字符）的
+            if len(t) < 3 or len(t) > 50:
+                continue
+            # 跳过明显是场景描述而非触发词的
+            if re.search(r'\b(planning|checks|analysis|trends|services|sources|data)\b', t, re.IGNORECASE):
+                continue
+            quality_triggers.append(t)
+
+        return {
+            'version': VERSION,
+            'skill_name': analysis.get('name', 'unknown'),
+            'skill_path': str(self.skill_path),
+            'analysis': analysis,
+            'hints': {
+                'trigger_phrases_detected': quality_triggers or trigger_hints[:3],
+                'commands_detected': [{'subcmd': c.get('subcmd', ''), 'description': c.get('description', '')} for c in commands],
+                'output_format_detected': output_format or '',
+                'fill_instructions': FILL_INSTRUCTIONS,
+            },
+            'cases': skeleton_cases,
+            'total': len(skeleton_cases),
+            'execution': {'status': 'pending'},
+        }
+
+    def _count_error_cases(self, analysis: Dict) -> int:
+        """根据风险分析确定 error_handling 案例数量"""
+        risks = analysis.get('risks', [])
+        count = 0
+        for risk in risks:
+            if risk.get('type') in ('认证', '网络'):
+                count += 1
+        return max(count, 1)  # 至少 1 个
 
     def _generate_adversarial(self, analysis: Dict) -> List[Dict[str, Any]]:
         """
@@ -712,16 +945,24 @@ class SmartTestGenerator:
 if __name__ == '__main__':
     import sys
     import json
-    
+
     if len(sys.argv) < 2:
-        print("用法: smart_test_generator.py <skill-path>")
+        print("用法: smart_test_generator.py <skill-path> [--skeleton]")
         sys.exit(1)
-    
-    generator = SmartTestGenerator(Path(sys.argv[1]))
+
+    skeleton_mode = '--skeleton' in sys.argv
+    skill_path = sys.argv[1]
+
+    generator = SmartTestGenerator(Path(skill_path))
     analysis = generator.analyze()
-    test_cases = generator.generate()
-    
-    print("分析结果:")
-    print(json.dumps(analysis, indent=2, ensure_ascii=False))
-    print("\n生成的测试用例:")
-    print(json.dumps(test_cases, indent=2, ensure_ascii=False))
+
+    if skeleton_mode:
+        skeleton = generator.generate_skeleton()
+        print(json.dumps(skeleton, indent=2, ensure_ascii=False))
+    else:
+        # 保留原有的完整生成模式（向后兼容）
+        test_cases = generator.generate()
+        print("分析结果:")
+        print(json.dumps(analysis, indent=2, ensure_ascii=False))
+        print("\n生成的测试用例:")
+        print(json.dumps(test_cases, indent=2, ensure_ascii=False))

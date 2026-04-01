@@ -883,5 +883,173 @@ class TestFixSuggestions(unittest.TestCase):
         self.assertTrue('timeout' in fix.lower() or '超时' in fix)
 
 
+# ──────────────────────────────────────────────
+# FrontmatterParser — 统一 frontmatter 解析
+# ──────────────────────────────────────────────
+
+class TestFrontmatterParser(unittest.TestCase):
+    """测试统一的 frontmatter 解析器"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_standard_frontmatter(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "hello"\n---\n# Body\n', encoding='utf-8')
+        from frontmatter_parser import parse_skill_md
+        content, fm, body = parse_skill_md(str(self.skill))
+        self.assertEqual(fm['name'], 'test')
+        self.assertEqual(fm['description'], 'hello')
+        self.assertIn('Body', body)
+
+    def test_multiline_block_scalar(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: >\n  line one\n  line two\n---\n# Body\n', encoding='utf-8')
+        from frontmatter_parser import parse_skill_md
+        _, fm, _ = parse_skill_md(str(self.skill))
+        self.assertIn('line one', fm['description'])
+        self.assertIn('line two', fm['description'])
+
+    def test_quoted_with_colon(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "query: weather"\n---\n# Body\n', encoding='utf-8')
+        from frontmatter_parser import parse_skill_md
+        _, fm, _ = parse_skill_md(str(self.skill))
+        self.assertIn('query: weather', fm['description'])
+
+    def test_missing_skill_md(self):
+        empty = Path(self.tmp) / 'empty'
+        empty.mkdir()
+        from frontmatter_parser import parse_skill_md
+        content, fm, body = parse_skill_md(str(empty))
+        self.assertEqual(content, '')
+        self.assertEqual(fm, {})
+
+
+# ──────────────────────────────────────────────
+# MultiTrial 自动标记
+# ──────────────────────────────────────────────
+
+class TestMultiTrialAutoMark(unittest.TestCase):
+    """测试 smart_test_generator 自动标记 multi_trial"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_exact_match_is_multi_trial(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "当用户说「测试」时触发"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        cases = SmartTestGenerator(self.skill).generate()
+        exact = [c for c in cases if c.get('type') == 'exact_match']
+        self.assertTrue(all(c.get('multi_trial') for c in exact), 'exact_match 应自动标记 multi_trial')
+
+    def test_normal_path_is_multi_trial(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "当用户说「测试」时触发"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        cases = SmartTestGenerator(self.skill).generate()
+        normal = [c for c in cases if c.get('type') == 'normal_path']
+        self.assertTrue(all(c.get('multi_trial') for c in normal), 'normal_path 应自动标记 multi_trial')
+
+
+# ──────────────────────────────────────────────
+# Idempotency 自动生成
+# ──────────────────────────────────────────────
+
+class TestIdempotencyGeneration(unittest.TestCase):
+    """测试 smart_test_generator 自动生成 idempotency_check"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_idempotency_case_generated(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "当用户说「测试」时触发"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        cases = SmartTestGenerator(self.skill).generate()
+        idempotency = [c for c in cases if c.get('type') == 'idempotency_check']
+        self.assertGreater(len(idempotency), 0, '应自动生成至少 1 个 idempotency_check')
+        self.assertTrue(idempotency[0].get('multi_trial'), 'idempotency 应标记 multi_trial')
+
+
+# ──────────────────────────────────────────────
+# SmartTestGenerator — 骨架生成模式
+# ──────────────────────────────────────────────
+
+class TestSkeletonGeneration(unittest.TestCase):
+    """测试骨架生成模式"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.skill = Path(self.tmp) / 'skill'
+        self.skill.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_skeleton_returns_expected_structure(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test-skill\ndescription: "当用户说「测试」时触发"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        skeleton = SmartTestGenerator(self.skill).generate_skeleton()
+        self.assertIn('skill_name', skeleton)
+        self.assertIn('analysis', skeleton)
+        self.assertIn('hints', skeleton)
+        self.assertIn('cases', skeleton)
+        self.assertIn('total', skeleton)
+
+    def test_skeleton_has_all_dimensions(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "当用户说「查看」时触发"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        skeleton = SmartTestGenerator(self.skill).generate_skeleton()
+        dims = {c['dimension'] for c in skeleton['cases']}
+        self.assertIn('hit_rate', dims)
+        self.assertIn('agent_comprehension', dims)
+        self.assertIn('execution_success', dims)
+
+    def test_skeleton_cases_have_empty_input(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "测试 Skill"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        skeleton = SmartTestGenerator(self.skill).generate_skeleton()
+        for case in skeleton['cases']:
+            # input 应为空字符串（等待 Agent 填充）
+            self.assertEqual(case['input'], '', f'{case["id"]} 的 input 应为空')
+
+    def test_skeleton_has_hints(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "当用户说「查询」时触发"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        skeleton = SmartTestGenerator(self.skill).generate_skeleton()
+        hints = skeleton['hints']
+        self.assertIn('trigger_phrases_detected', hints)
+        self.assertIn('fill_instructions', hints)
+
+    def test_skeleton_exact_match_is_multi_trial(self):
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: test\ndescription: "测试"\n---\n# T\n', encoding='utf-8')
+        from smart_test_generator import SmartTestGenerator
+        skeleton = SmartTestGenerator(self.skill).generate_skeleton()
+        exact = [c for c in skeleton['cases'] if c['type'] == 'exact_match']
+        self.assertTrue(all(c.get('multi_trial') for c in exact))
+
+
 if __name__ == '__main__':
     unittest.main()

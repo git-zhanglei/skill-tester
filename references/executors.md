@@ -100,4 +100,4 @@ python3 parallel_test_runner.py <cases_json> --finalize
 |------|--------|
 | 快速验证 | `--timeout 60` |
 | 标准测试 | `--timeout 120`（默认） |
-| 有状态 Skill | `--parallel 1`（串行） |
+| 有状态 Skill | 串行执行（按顺序逐个测试） |

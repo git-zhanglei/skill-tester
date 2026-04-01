@@ -25,6 +25,7 @@ class SandboxChecker:
             'label': '环境变量',
             'reason': '检测到环境变量依赖（如 API Key / Token），默认沙箱无法直接继承宿主机密钥',
             'setup_instructions': '请在运行测试前设置相关环境变量（如 export ALI_1688_AK=xxx），或通过目标 Skill 的配置命令设置',
+            'verify_command': 'env | grep -i "KEY\\|TOKEN\\|SECRET\\|AK" | head -5',
             'patterns': [
                 r'os\.environ',
                 r'os\.getenv',
@@ -40,6 +41,7 @@ class SandboxChecker:
             'label': '网络访问',
             'reason': '检测到外部网络/API 依赖，沙箱通常禁网或网络受限',
             'setup_instructions': '确保测试环境可访问外部网络。若在沙箱中测试，需配置网络白名单或代理',
+            'verify_command': 'curl -s --connect-timeout 3 https://httpbin.org/get | head -1',
             'patterns': [
                 r'https?://',
                 r'\bcurl\b',
@@ -58,6 +60,7 @@ class SandboxChecker:
             'label': '浏览器能力',
             'reason': '检测到浏览器/页面自动化依赖，沙箱环境通常不会默认开放浏览器能力',
             'setup_instructions': '确保 OpenClaw 浏览器能力可用（browser tool 已配置），或在有头模式下测试',
+            'verify_command': 'echo "浏览器能力需在 OpenClaw 配置中确认"',
             'patterns': [
                 r'\bplaywright\b',
                 r'\bchrome[-_ ]devtools\b',
@@ -101,6 +104,7 @@ class SandboxChecker:
                         'label': rule['label'],
                         'reason': rule['reason'],
                         'setup_instructions': rule.get('setup_instructions', ''),
+                        'verify_command': rule.get('verify_command', ''),
                         'evidence': [],
                     })
                     if len(entry['evidence']) < 3:

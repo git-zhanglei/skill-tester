@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from frontmatter_parser import parse_skill_md
+
 PASS = 'pass'
 WARN = 'warn'
 FAIL = 'fail'
@@ -63,24 +65,6 @@ WORKFLOW_HINT_PATTERNS = [
 # ─────────────────────────────────────────────
 # 工具函数
 # ─────────────────────────────────────────────
-
-def _read_skill_md(skill_path: str) -> Tuple[str, Dict[str, str], str]:
-    """返回 (full_content, frontmatter_dict, body)"""
-    path = Path(skill_path) / 'SKILL.md'
-    if not path.exists():
-        return '', {}, ''
-    content = path.read_text(encoding='utf-8')
-    fm: Dict[str, str] = {}
-    body = content
-    match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
-    if match:
-        for line in match.group(1).split('\n'):
-            if ':' in line:
-                k, _, v = line.partition(':')
-                fm[k.strip()] = v.strip().strip('"\'')
-        body = content[match.end():]
-    return content, fm, body
-
 
 def _result(id_: str, category: str, status: str, message: str) -> Dict:
     return {'id': id_, 'category': category, 'status': status, 'message': message}
@@ -141,7 +125,7 @@ def check_skill_md_exists(skill_path: str) -> Dict:
 
 
 def check_valid_frontmatter(skill_path: str) -> Dict:
-    _, fm, _ = _read_skill_md(skill_path)
+    _, fm, _ = parse_skill_md(skill_path)
     if not fm:
         return _result('valid_frontmatter', 'structure', FAIL,
                        '缺少 YAML frontmatter（文件需以 --- 开头）')
@@ -155,7 +139,7 @@ def check_valid_frontmatter(skill_path: str) -> Dict:
 
 def check_name_matches_dir(skill_path: str) -> Dict:
     dir_name = Path(skill_path).resolve().name
-    _, fm, _ = _read_skill_md(skill_path)
+    _, fm, _ = parse_skill_md(skill_path)
     skill_name = fm.get('name', '')
     if not skill_name:
         return _result('name_matches_dir', 'structure', WARN,
@@ -179,7 +163,7 @@ def check_no_extraneous_files(skill_path: str) -> Dict:
 
 
 def check_has_guardrails(skill_path: str) -> Dict:
-    _, fm, body = _read_skill_md(skill_path)
+    _, fm, body = parse_skill_md(skill_path)
     has = bool(re.search(r'^#+\s*Guardrails', body, re.MULTILINE | re.IGNORECASE))
     if has:
         return _result('has_guardrails', 'structure', PASS, '有 Guardrails 章节')
@@ -198,7 +182,7 @@ def check_has_guardrails(skill_path: str) -> Dict:
 
 def check_description_length(skill_path: str) -> Dict:
     """description 有效字符数检查（中英混合）"""
-    _, fm, _ = _read_skill_md(skill_path)
+    _, fm, _ = parse_skill_md(skill_path)
     desc = fm.get('description', '')
     # 对中英混合，以去掉空白和标点后的字符数衡量
     effective = len(re.sub(r'[\s\W]', '', desc))
@@ -216,7 +200,7 @@ def check_description_length(skill_path: str) -> Dict:
 
 def check_description_trigger_context(skill_path: str) -> Dict:
     """description 是否包含触发上下文短语"""
-    _, fm, _ = _read_skill_md(skill_path)
+    _, fm, _ = parse_skill_md(skill_path)
     desc = fm.get('description', '').lower()
     trigger_phrases = [
         'use when', 'use for', 'when the user', 'when asked',
@@ -243,7 +227,7 @@ def check_token_cost(skill_path: str) -> Dict:
       251-400 → warn（建议优化）
       >400  → fail（过重）
     """
-    _, _, body = _read_skill_md(skill_path)
+    _, _, body = parse_skill_md(skill_path)
     lines = len(body.splitlines())
 
     if lines <= 150:
@@ -260,7 +244,7 @@ def check_token_cost(skill_path: str) -> Dict:
 
 
 def check_has_workflow(skill_path: str) -> Dict:
-    _, fm, body = _read_skill_md(skill_path)
+    _, fm, body = parse_skill_md(skill_path)
     patterns = [r'##\s*Workflow', r'##\s*执行步骤', r'##\s*Steps', r'##\s*工作流']
     if any(re.search(p, body, re.IGNORECASE) for p in patterns):
         return _result('has_workflow', 'documentation', PASS, '有 Workflow / 执行步骤 章节')
@@ -280,7 +264,7 @@ def check_references_linked(skill_path: str) -> Dict:
     ref_files = [f.name for f in ref_dir.iterdir() if not f.name.startswith('.')]
     if not ref_files:
         return _result('references_linked', 'documentation', PASS, 'references/ 目录为空')
-    content, _, _ = _read_skill_md(skill_path)
+    content, _, _ = parse_skill_md(skill_path)
     unlinked = [f for f in ref_files if f not in content]
     if unlinked:
         return _result('references_linked', 'documentation', WARN,
@@ -368,7 +352,7 @@ def check_env_vars_documented(skill_path: str) -> Dict:
                 env_vars.add(v)
     if not env_vars:
         return _result('env_vars_documented', 'security', PASS, '脚本中未使用环境变量')
-    skill_content, _, _ = _read_skill_md(skill_path)
+    skill_content, _, _ = parse_skill_md(skill_path)
     undoc = [v for v in env_vars if v not in skill_content]
     if undoc:
         return _result('env_vars_documented', 'security', WARN,
@@ -386,7 +370,7 @@ def check_composability(skill_path: str) -> Dict:
     机器可读输出信号检测（Composability，来自 skill-evaluator 8.3）
     --json / JSON 输出 / exit code → 有利于 CI/CD 集成
     """
-    content, _, _ = _read_skill_md(skill_path)
+    content, _, _ = parse_skill_md(skill_path)
     signals: List[str] = []
     if re.search(r'--json', content):
         signals.append('--json 标志')

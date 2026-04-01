@@ -54,7 +54,8 @@ TEST_TYPE_NAMES = {
     'normal_path':    '正常路径',
     'boundary_case':  '边界条件',
     'error_handling': '异常处理',
-    'adversarial':    '对抗性测试',
+    'adversarial':        '对抗性测试',
+    'idempotency_check': '幂等性测试',
 }
 
 # V3 维度权重
@@ -66,7 +67,6 @@ DIMENSION_WEIGHTS = {
 }
 
 # 默认执行配置
-DEFAULT_PARALLEL  = 4
 DEFAULT_TIMEOUT   = 120
 DEFAULT_MAX_CASES = 30   # 与 SKILL.md "质量优先，总数≤30" 一致
 

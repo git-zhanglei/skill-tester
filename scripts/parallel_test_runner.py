@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from constants import DEFAULT_TIMEOUT, DEFAULT_PARALLEL, TestStatus, EARLY_EXIT_THRESHOLD, EARLY_EXIT_REASONS
+from constants import DEFAULT_TIMEOUT, TestStatus, EARLY_EXIT_THRESHOLD, EARLY_EXIT_REASONS
 
 
 # ─────────────────────────────────────────────────────────
@@ -42,6 +42,19 @@ EVALUATION_HINTS = {
     ('execution_success', 'error_handling'):  '检查：错误场景是否有清晰的错误提示？',
     ('execution_success', 'adversarial'):     '检查：越权/歧义/恶意输入是否被拒绝并给出说明？',
     ('execution_success', 'idempotency_check'): '检查：两次执行相同操作，结果是否一致？',
+}
+
+# 确定性检查规则（不依赖 LLM 判断）
+# 返回 (should_apply: bool, passed: bool, reason: str)
+DETERMINISTIC_RULES = {
+    ('hit_rate', 'exact_match'): {
+        'check': 'skill_name_in_output',
+        'description': '检查子 Agent 输出中是否提及目标 Skill 的关键操作',
+    },
+    ('hit_rate', 'negative_test'): {
+        'check': 'skill_name_not_in_output',
+        'description': '检查子 Agent 输出中不应包含目标 Skill 的特征操作',
+    },
 }
 
 
@@ -91,7 +104,7 @@ class TestCoordinator:
                 f'{case.get("input", "")}'
             )
 
-            tasks.append({
+            task_entry = {
                 'case_id':        case['id'],
                 'dimension':      dim,
                 'type':           typ,
@@ -102,7 +115,14 @@ class TestCoordinator:
                 'expected':       case.get('expected'),
                 'description':    case.get('description', ''),
                 'evaluation_hint': EVALUATION_HINTS.get((dim, typ), '评估输出是否符合预期'),
-            })
+            }
+
+            # 附加确定性检查规则（如果有）
+            det_rule = DETERMINISTIC_RULES.get((dim, typ))
+            if det_rule:
+                task_entry['deterministic_rule'] = det_rule
+
+            tasks.append(task_entry)
 
         multi_trial_count = sum(1 for t in tasks if t['multi_trial'])
         plan = {

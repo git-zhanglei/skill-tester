@@ -20,7 +20,7 @@ source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-
 
 - **`<skill_path>`**：目标 Skill 目录。未提供则询问
 - `--yes`：跳过确认 | `--timeout <n>`：每案例超时秒（默认 120）
-- `--trials <n>`：critical 案例重复次数（默认 3） | `--parallel <n>`：并行数（默认 4）
+- `--trials <n>`：critical 案例重复次数（默认 3）
 - `--output-json`：同时输出 JSON（CI/CD 用） | `--eval-md`：写入 EVAL.md
 - `--dry-run`：仅步骤 1-2.5 | `--skip-safety`：跳过安全检查（调试用）
 
@@ -51,12 +51,18 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ## 步骤 3：生成测试案例
 
-1. **自动生成**：`python3 {baseDir}/scripts/smart_test_generator.py <skill_path>`
-2. **Agent 审查**：根据目标 Skill 业务逻辑补充调整，质量优先，总数 ≤ 30
-3. **保存**为 JSON（含 `safety`/`spec_score`/`sandbox_check`），验证：`python3 {baseDir}/scripts/test_cases_validator.py <cases_json>`
+1. **生成骨架**：`python3 {baseDir}/scripts/smart_test_generator.py <skill_path> --skeleton`
+2. **Agent 填充**：读目标 SKILL.md，为每个骨架案例填充 `input` 和 `expected`（参考 `hints` 但以自身理解为准），可增删案例，总数 ≤ 30
+3. **保存** JSON 到 `~/.skill-tester/test-cases/test-cases-{skill_name}-{YYYYMMDD}.json`。骨架已包含 `version`/`cases`/`execution`，Agent 补充 `safety`/`spec_score`/`sandbox_check` 字段后验证：`python3 {baseDir}/scripts/test_cases_validator.py <cases_json>`
 4. **用户确认门控**：展示全部案例。`--yes` 跳过；`sandbox_incompatible` 须告知风险
 
 四维度设计详见 [references/test-cases.md](./references/test-cases.md)。
+
+**跨步骤变量**（Agent 须在全流程中保持）：
+- `safety_status`: 步骤 1 输出（passed/warning/failed）
+- `spec_score`: 步骤 2 输出（float）
+- `sandbox_check`: 步骤 1.5 输出（compatible/incompatible + setup_checklist）
+- `cases_json`: 步骤 3 保存路径
 
 ## 步骤 4：执行测试案例
 
@@ -96,12 +102,10 @@ python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>
 
 ## 评级
 
-| 综合评分 | 评级 | 认证 |
-|---------|------|------|
-| 90–100 | ⭐⭐⭐⭐⭐ 优秀 | 🏆 Certified |
-| 70–89 | ⭐⭐⭐⭐ 良好 | ✅ Verified |
-| 40–69 | ⭐⭐⭐ 可接受 | 🔄 Beta |
-| 0–39 | ⭐⭐ 需改进 | — |
+- **90–100** ⭐⭐⭐⭐⭐ 优秀 → 🏆 Certified
+- **70–89** ⭐⭐⭐⭐ 良好 → ✅ Verified
+- **40–69** ⭐⭐⭐ 可接受 → 🔄 Beta
+- **0–39** ⭐⭐ 需改进
 
 ## 已知限制
 
