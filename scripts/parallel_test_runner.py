@@ -20,6 +20,8 @@ Test Coordinator — 配合 Agent 执行测试案例的协调工具
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -413,8 +415,6 @@ class TestCoordinator:
         3. 检查输出是否包含 verify_expect
         4. 更新 status 并检查 all_verified
         """
-        import subprocess
-
         deps = self.data.get('dependencies', {})
         items = deps.get('items', [])
 
@@ -443,7 +443,6 @@ class TestCoordinator:
                 # 1. 纯字符串 in 匹配
                 # 2. 正则匹配（verify_expect 含 .* 或 \d 等元字符时）
                 # 3. JSON 值匹配（如 "ak_configured": true）
-                import re
                 matched = False
                 # 先尝试直接包含
                 if verify_expect in output:
@@ -458,8 +457,7 @@ class TestCoordinator:
                 # 再尝试 JSON 值匹配：将 "key.*true" 转为检查 JSON 中 key=true
                 if not matched:
                     try:
-                        import json as _json
-                        parsed = _json.loads(output.strip()) if output.strip().startswith('{') else None
+                        parsed = json.loads(output.strip()) if output.strip().startswith('{') else None
                         if parsed and isinstance(parsed, dict):
                             # 从 verify_expect 提取 key 和 expected value
                             kv_match = re.match(r'^(\w+).*?(true|false|configured|ok)$',
