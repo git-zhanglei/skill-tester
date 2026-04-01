@@ -2,25 +2,15 @@
 
 ## 概述
 
-skill-tester 的测试案例覆盖 4 个维度。案例可通过 `smart_test_generator.py` 自动生成基础案例，再由 Agent 审查补充。保存为 JSON 文件，支持复用与断点续测。最大案例数默认 30（上限），实际生成数可小于 30。
+skill-tester 的测试案例覆盖 4 个维度，保存为 JSON 文件，支持复用与断点续测。最大案例数默认 30（上限）。
 
-### 自动生成
-
-```bash
-python3 scripts/smart_test_generator.py <skill_path>
-```
-
-自动分析目标 SKILL.md，生成覆盖四维度的基础案例。Agent 在此基础上审查、补充业务逻辑相关的测试案例。
-
-### 切片测试
-
-使用 `--dimension` 参数只执行指定维度的 pending 案例：
+### 骨架模式生成
 
 ```bash
-python3 scripts/parallel_test_runner.py <cases_json> --prepare --dimension hit_rate
+python3 scripts/smart_test_generator.py <skill_path> --skeleton
 ```
 
-在进入执行前，主流程应向用户展示**全部测试案例**（而不是部分样例），并在用户确认后开始执行。
+生成覆盖四维度的骨架案例（含 `dimension`、`type`、`hints`，但 `input` 和 `expected` 为空）。Agent 需读取目标 SKILL.md 后，基于自身理解为每个骨架填充 `input` 和 `expected`（参考 `hints` 但不受其限制），可增删案例。
 
 ## 4 个测试维度
 
@@ -240,32 +230,3 @@ pending → running → completed (passed / failed / timeout / error)
 - `timeout`：执行超时
 - `error`：执行出现异常
 
-## 自定义测试案例
-
-创建 `custom-tests.yaml` 文件，添加自定义测试：
-
-```yaml
-test_cases:
-  - id: custom_001
-    dimension: execution_success
-    type: normal_path
-    input: "测试skill ~/skills/my-skill/ --yes --output-json"
-    expected:
-      status: "completed"
-      report_generated: true
-    description: "我的特殊场景测试"
-    weight: 1.5
-
-  - id: custom_002
-    dimension: hit_rate
-    type: fuzzy_match
-    input: "帮我看看这个skill好不好用"
-    expected: "activate"
-    description: "口语化触发词测试"
-```
-
-运行时加载：
-
-```bash
-测试skill ~/skills/my-skill/ --custom-tests ./custom-tests.yaml
-```

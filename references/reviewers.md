@@ -22,25 +22,9 @@
 
 ---
 
-## 维度 1：触发命中率评审器（权重 25%）
+## 维度 1：触发命中率（权重 25%）
 
-**评审逻辑：**
-
-```python
-def calculate_hit_rate_score(test_results: list) -> float:
-    exact_tests    = [r for r in test_results if r['type'] == 'exact_match']
-    fuzzy_tests    = [r for r in test_results if r['type'] == 'fuzzy_match']
-    negative_tests = [r for r in test_results if r['type'] == 'negative_test']
-    
-    # 各子类型通过率
-    exact_rate    = passed(exact_tests)    / len(exact_tests)    if exact_tests    else 0
-    fuzzy_rate    = passed(fuzzy_tests)    / len(fuzzy_tests)    if fuzzy_tests    else 0
-    negative_rate = passed(negative_tests) / len(negative_tests) if negative_tests else 0
-    
-    # 加权合并（精确:模糊:负面 = 4:4:2）
-    hit_rate = (exact_rate * 0.4 + fuzzy_rate * 0.4 + negative_rate * 0.2) * 100
-    return hit_rate
-```
+加权合并三类测试的通过率：精确匹配×0.4 + 模糊匹配×0.4 + 负面测试×0.2。
 
 **分析要点：**
 - 精确匹配失败 → 触发词描述有问题，需修改 SKILL.md
@@ -49,149 +33,40 @@ def calculate_hit_rate_score(test_results: list) -> float:
 
 ---
 
-## 维度 2：Skill规范程度评审器（权重 20%）
+## 维度 2：Skill规范程度（权重 20%）
 
-静态分析 SKILL.md，无需执行 Agent。
+静态分析 SKILL.md，由 `spec_checker.py` 自动执行，无需 Agent 运行。
 
-```python
-def calculate_spec_score(skill_path: str) -> dict:
-    skill_md = read_file(f"{skill_path}/SKILL.md")
-    frontmatter, body = parse_frontmatter(skill_md)
-    lines = skill_md.split('\n')
-    
-    score = 100
-    findings = []
-    
-    # Frontmatter name（15%）
-    if not frontmatter.get('name'):
-        score -= 15
-        findings.append("❌ frontmatter 缺少 'name' 字段")
-    
-    # Frontmatter description（15%）
-    if not frontmatter.get('description') or len(frontmatter.get('description','')) < 10:
-        score -= 15
-        findings.append("❌ frontmatter 缺少有效的 'description' 字段")
-    
-    # 长度限制（15%）
-    if len(lines) > 500:
-        score -= 15
-        findings.append(f"❌ SKILL.md 有 {len(lines)} 行，超过 500 行限制")
-    elif len(lines) > 400:
-        score -= 5
-        findings.append(f"⚠️ SKILL.md 有 {len(lines)} 行，接近 500 行限制")
-    
-    # 渐进式披露（20%）
-    has_references = os.path.exists(f"{skill_path}/references/")
-    if len(lines) > 200 and not has_references:
-        score -= 20
-        findings.append("❌ SKILL.md 较长但无 references/ 目录，建议使用渐进式披露")
-    elif len(lines) > 300 and has_references:
-        ref_files = os.listdir(f"{skill_path}/references/")
-        if len(ref_files) < 2:
-            score -= 10
-            findings.append("⚠️ SKILL.md 较长，references/ 中文档不足")
-    
-    # 结构清晰度（20%）
-    has_h1 = any(line.startswith('# ') for line in lines)
-    has_quick_start = any('快速开始' in line or 'Quick Start' in line for line in lines)
-    if not has_h1:
-        score -= 10
-        findings.append("❌ 缺少 H1 标题")
-    if not has_quick_start:
-        score -= 10
-        findings.append("⚠️ 建议添加快速开始章节")
-    
-    # 代码示例（15%）
-    code_blocks = body.count('```')
-    if code_blocks < 2:
-        score -= 15
-        findings.append("❌ 缺少代码/命令示例（至少需要 1 个代码块）")
-    
-    return {
-        'score': max(0, score),
-        'findings': findings,
-        'recommendations': generate_recommendations(findings)
-    }
-```
+共 14 项检查，分 6 类：structure、trigger、documentation、scripts、security、agent_specific。
+
+评分：`pass=2分 / warn=1分 / fail=0分`，归一到 0-100。得分直接取 `summary.spec_score`。
 
 ---
 
-## 维度 3：Agent理解度评审器（权重 25%）
+## 维度 3：Agent理解度（权重 25%）
 
-在执行阶段，分析 Agent 执行日志来评估理解准确性。
+聚焦最终结果（outcome），不评估执行过程。两类检查：
 
-```python
-def calculate_comprehension_score(test_results: list, skill_md: str) -> float:
-    expected_steps   = extract_declared_steps(skill_md)
-    expected_tools   = extract_declared_tools(skill_md)
-    
-    step_scores   = []
-    tool_scores   = []
-    format_scores = []
-    error_scores  = []
-    
-    for result in test_results:
-        if result['dimension'] != 'agent_comprehension':
-            continue
-        
-        if result['type'] == 'step_following':
-            observed = result['result'].get('steps_observed', [])
-            coverage = len(set(observed) & set(expected_steps)) / len(expected_steps)
-            step_scores.append(coverage)
-        
-        elif result['type'] == 'tool_selection':
-            called = result['result'].get('tools_called', [])
-            precision = len(set(called) & set(expected_tools)) / max(len(called), 1)
-            tool_scores.append(precision)
-        
-        elif result['type'] == 'output_format':
-            format_scores.append(1.0 if result['result']['status'] == 'passed' else 0.0)
-        
-        elif result['type'] == 'error_behavior':
-            error_scores.append(1.0 if result['result']['status'] == 'passed' else 0.0)
-    
-    # 4 类型加权平均（步骤:工具:格式:错误 = 3:3:2:2）
-    weights = [0.3, 0.3, 0.2, 0.2]
-    scores  = [avg(step_scores), avg(tool_scores), avg(format_scores), avg(error_scores)]
-    return sum(w * s for w, s in zip(weights, scores)) * 100
-```
+- **outcome_check**：实际产物是否符合 Skill 声明的预期结果
+- **format_check**：输出格式是否符合 Skill 声明的格式规范
+
+得分 = 通过的 check 数 / 总 check 数 × 100。
 
 **分析要点：**
-- 步骤遵循度低 → Skill 流程描述不够清晰，Agent 难以理解执行顺序
-- 工具调用不准确 → Skill 中工具说明含糊，或声明了不存在的工具
-- 输出格式不符 → Skill 中输出格式描述不具体
+- outcome_check 失败率高 → Skill 流程描述不够清晰，Agent 难以理解执行目标
+- format_check 失败率高 → Skill 中输出格式描述不具体
 
 ---
 
-## 维度 4：执行成功率评审器（权重 30%）
+## 维度 4：执行成功率（权重 30%）
 
-统计各场景类型的通过率（含 adversarial 和 idempotency_check）。
+按场景类型加权统计通过率：
 
-```python
-def calculate_execution_score(test_results: list) -> float:
-    normal      = [r for r in test_results if r['type'] == 'normal_path'       and r['dimension'] == 'execution_success']
-    boundary    = [r for r in test_results if r['type'] == 'boundary_case'     and r['dimension'] == 'execution_success']
-    error_h     = [r for r in test_results if r['type'] == 'error_handling'    and r['dimension'] == 'execution_success']
-    adversarial = [r for r in test_results if r['type'] == 'adversarial'       and r['dimension'] == 'execution_success']
-    idempotency = [r for r in test_results if r['type'] == 'idempotency_check' and r['dimension'] == 'execution_success']
-    
-    # 加权合并：normal×0.40 + boundary×0.25 + error×0.20 + adversarial×0.10 + idempotency×0.05
-    w_n = len(normal)      * 0.40
-    w_b = len(boundary)    * 0.25
-    w_e = len(error_h)     * 0.20
-    w_a = len(adversarial) * 0.10
-    w_i = len(idempotency) * 0.05
-    total_w = w_n + w_b + w_e + w_a + w_i
-    if total_w == 0:
-        return 0.0
-    
-    p_n = sum(1 for c in normal      if is_passed(c))
-    p_b = sum(1 for c in boundary    if is_passed(c))
-    p_e = sum(1 for c in error_h     if is_passed(c))
-    p_a = sum(1 for c in adversarial if is_passed(c))
-    p_i = sum(1 for c in idempotency if is_passed(c))
-    return (p_n * 0.40 + p_b * 0.25 + p_e * 0.20 + p_a * 0.10 + p_i * 0.05) / total_w * 100
-```
+- normal_path × 0.40
+- boundary_case × 0.25
+- error_handling × 0.20
+- adversarial × 0.10
+- idempotency_check × 0.05
 
 **分析要点：**
 - 正常路径失败率高 → Skill 核心功能有问题，优先修复
@@ -204,60 +79,12 @@ def calculate_execution_score(test_results: list) -> float:
 
 ## Token 成本（参考维度）
 
-Token 消耗在报告中展示但不计入综合评分。作为参考维度：
-
-- **总 Token 消耗**：所有案例的 tokens_in + tokens_out 总和
-- **平均每案例**：总 Token / 完成案例数
-- **最高单案例**：最消耗 Token 的单个案例
-
-Token 数据从子 Agent 执行后的 completion event stats 中提取，记录时通过 `--tokens-in` / `--tokens-out` 参数传入。
-
-高 Token 消耗可能提示：
+Token 消耗在报告中展示但不计入综合评分。高 Token 消耗可能提示：
 - 测试案例输入过于复杂
 - 目标 Skill SKILL.md 过长（建议精简或使用渐进式披露）
 - Skill 触发后调用了大量子流程
 
-## 综合报告生成
-
-```python
-def generate_report(safety_result, hit_rate_score, spec_score, 
-                    comprehension_score, execution_score, config) -> dict:
-    # 安全门控
-    if safety_result['status'] == 'failed':
-        return {
-            'overall_score': 0,
-            'rating': '❌ 不合格',
-            'safety': safety_result,
-            'note': '安全检查失败，测试已终止'
-        }
-    
-    weights = config['weights']
-    overall = (
-        hit_rate_score      * weights['hit_rate']          / 100 +
-        spec_score          * weights['spec_compliance']   / 100 +
-        comprehension_score * weights['agent_comprehension']/ 100 +
-        execution_score     * weights['execution_success'] / 100
-    )
-    
-    # 特殊规则：单维度 < 40 则评级上限为 ⭐⭐⭐
-    min_score = min(hit_rate_score, spec_score, comprehension_score, execution_score)
-    rating = get_rating(overall)
-    if min_score < 40 and rating in ['⭐⭐⭐⭐⭐', '⭐⭐⭐⭐']:
-        rating = '⭐⭐⭐（单维度不达标限制）'
-    
-    return {
-        'overall_score': round(overall, 1),
-        'rating': rating,
-        'dimensions': {
-            'hit_rate':             {'score': hit_rate_score,      'weight': weights['hit_rate']},
-            'spec_compliance':      {'score': spec_score,          'weight': weights['spec_compliance']},
-            'agent_comprehension':  {'score': comprehension_score, 'weight': weights['agent_comprehension']},
-            'execution_success':    {'score': execution_score,     'weight': weights['execution_success']}
-        },
-        'safety': safety_result,
-        'recommendations': generate_recommendations(...)
-    }
-```
+---
 
 ## 优化建议生成规则
 

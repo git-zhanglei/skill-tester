@@ -66,38 +66,21 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ## 步骤 4：执行测试案例
 
-**4.1** 生成执行计划（自动跳过已完成案例，支持断点续跑）：
-```bash
-python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension <dim>]
-```
+按 [references/executors.md](./references/executors.md) 执行：
 
-**4.2** 对每个 task 调用 `sessions_spawn`，传入纯净 `task_description`。必须拿到输出才可记录。
-
-**4.3** 评估并记录（Token 从子 Agent completion stats 提取）：
-```bash
-python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> \
-    --record <case_id> --status passed|failed|error \
-    --outcome "摘要" --session-id "<id>" --tokens-in <N> --tokens-out <N>
-```
-
-**4.4 早期终止**：连续 3 个案例同因失败 → 停止，报告根因，建议修复后重试。
-
-**4.5** 汇总：`python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> --finalize`
+1. `--prepare` 生成执行计划（自动跳过已完成，支持断点续跑）
+2. 对每个 task 调用 `sessions_spawn`，传入纯净 `task_description`
+3. `--record` 评估并记录结果（含 token 统计）
+4. **早期终止**：连续 3 个同因失败 → 停止，报告根因
+5. `--finalize` 汇总
 
 ## 步骤 5：生成报告
-
-```
-触发命中率    = (精确×0.4 + 模糊×0.4 + 负面×0.2) / 加权总数 × 100
-Skill规范程度 = spec_score
-Agent理解度   = (outcome_check + format_check) pass / 总数 × 100
-执行成功率    = (normal×0.40 + boundary×0.25 + error×0.20 + adversarial×0.10 + idempotency×0.05) / 加权总数 × 100
-综合评分      = 命中率×0.25 + 规范×0.20 + 理解度×0.25 + 成功率×0.30
-```
-安全 `failed` → 综合归零；任意维度 < 40 → 评级上限 ⭐⭐⭐
 
 ```bash
 python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>] [--json]
 ```
+安全 `failed` → 综合归零；任意维度 < 40 → 评级上限 ⭐⭐⭐。评分公式详见 [references/reviewers.md](./references/reviewers.md)。
+
 `--eval-md` 生成 EVAL.md；`--json` 输出 JSON 供 CI/CD（配合 `ci_gate.py` 使用）。
 
 ## 评级
@@ -113,8 +96,13 @@ python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>
 - sessions_spawn 不支持 skills 参数 → 目标 Skill 须已在 available_skills 中配置
 - 依赖未补齐时测试不可信 → 务必先完成步骤 2.5
 
-## 参考文档
+## 参考文档（按需加载）
 
-- [test-cases.md](./references/test-cases.md) | [executors.md](./references/executors.md) | [reviewers.md](./references/reviewers.md)
-- [safety-checker.md](./references/safety-checker.md) | [report-template.md](./references/report-template.md)
-- [troubleshooting.md](./references/troubleshooting.md) | [ci-cd.md](./references/ci-cd.md) | [config.md](./references/config.md)
+- **步骤 3 详解** → [test-cases.md](./references/test-cases.md)：四维度案例格式与示例
+- **步骤 4 详解** → [executors.md](./references/executors.md)：执行命令、断点续跑、错误处理
+- **步骤 5 详解** → [reviewers.md](./references/reviewers.md)：评分公式与评审逻辑
+- **报告格式** → [report-template.md](./references/report-template.md)：报告结构与输出样例
+- **安全检查规则** → [safety-checker.md](./references/safety-checker.md)：步骤 1 的检查规则详情
+- **CI/CD 集成** → [ci-cd.md](./references/ci-cd.md)：`ci_gate.py` 用法和 GitHub Actions 示例
+- **常见问题** → [troubleshooting.md](./references/troubleshooting.md)：执行失败排查
+- **高级配置** → [config.md](./references/config.md)：超时、早期终止等参数调整
