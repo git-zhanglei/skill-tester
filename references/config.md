@@ -41,7 +41,7 @@ thresholds:
 
 1. 命令行参数（最高）
 2. 环境变量
-3. 配置文件（`~/.skill-tester/config.yaml`）
+3. 配置文件（`<workspace>/.skill-tester/config.yaml`）
 4. 默认值（最低）
 
 ## 环境变量
@@ -66,7 +66,7 @@ SKILL_TESTER_SKIP_SAFETY=false
 ## 自定义配置文件
 
 ```yaml
-# ~/.skill-tester/config.yaml
+# <workspace>/.skill-tester/config.yaml
 timeout_per_test: 120
 multi_model: true
 

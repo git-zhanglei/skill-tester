@@ -15,6 +15,7 @@ source: "inspired by terwox/skill-evaluator, mgechev/skillgrade, rustyorb/agent-
 - **安全失败即终止**：步骤 1 `failed` → 综合评分 0
 - **不泄露内部实现**、**不自我测试**
 - **防止测试数据污染**：子 Agent 不得知晓预期结果，主 Agent 事后独立评估
+- **测试案例禁止包含真实危险操作**：adversarial 案例中不得出现 `rm -rf`、`mkfs`、`dd if=`、`:(){:|:&};:`、`> /dev/sda` 等破坏性命令。用无害占位符替代（如 `echo SIMULATED_DANGEROUS_COMMAND`）。原因：子 Agent 可能拥有高权限且不一定拒绝执行，后果不可逆
 
 ## 参数
 
@@ -47,13 +48,16 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ## 步骤 2.5：构造执行环境
 
-若 `sandbox_incompatible`，基于 `setup_checklist` 逐项引导用户补齐依赖（环境变量、网络、浏览器等）。所有依赖就绪后才进入步骤 3。`sandbox_compatible` 时跳过。
+**2.5.1 确认 Skill 已安装**（必须）：检查目标 Skill 是否出现在当前 `available_skills` 中。若不在，**停止测试**并告知用户：
+> ⚠️ 目标 Skill `{name}` 未被 OpenClaw 发现。请先安装到 `~/.openclaw/skills/` 或 `<workspace>/skills/`，然后重新开始测试。
+
+**2.5.2 补齐运行依赖**：若 `sandbox_incompatible`，基于 `setup_checklist` 逐项引导用户补齐依赖（环境变量、网络、浏览器等）。所有依赖就绪后才进入步骤 3。`sandbox_compatible` 时跳过。
 
 ## 步骤 3：生成测试案例
 
 1. **生成骨架**：`python3 {baseDir}/scripts/smart_test_generator.py <skill_path> --skeleton`
 2. **Agent 填充**：读目标 SKILL.md，为每个骨架案例填充 `input` 和 `expected`（参考 `hints` 但以自身理解为准），可增删案例，总数 ≤ 30
-3. **保存** JSON 到 `~/.skill-tester/test-cases/test-cases-{skill_name}-{YYYYMMDD}.json`。骨架已包含 `version`/`cases`/`execution`，Agent 补充 `safety`/`spec_score`/`sandbox_check` 字段后验证：`python3 {baseDir}/scripts/test_cases_validator.py <cases_json>`
+3. **保存** JSON 到 `<workspace>/.skill-tester/test-cases/test-cases-{skill_name}-{YYYYMMDD}.json`（`<workspace>` 即 Agent 的工作目录，通常为 `~/.openclaw/workspace`）。骨架已包含 `version`/`cases`/`execution`，Agent 补充 `safety`/`spec_score`/`sandbox_check` 字段后验证：`python3 {baseDir}/scripts/test_cases_validator.py <cases_json>`
 4. **用户确认门控**：展示全部案例。`--yes` 跳过；`sandbox_incompatible` 须告知风险
 
 四维度设计详见 [references/test-cases.md](./references/test-cases.md)。
@@ -70,9 +74,10 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 1. `--prepare` 生成执行计划（自动跳过已完成，支持断点续跑）
 2. 对每个 task 调用 `sessions_spawn`，传入纯净 `task_description`
-3. `--record` 评估并记录结果（含 token 统计）
-4. **早期终止**：连续 3 个同因失败 → 停止，报告根因
-5. `--finalize` 汇总
+3. **评估**：对比子 Agent 输出与案例 `expected`，参考 `evaluation_hint` 判断 passed/failed
+4. `--record` 记录结果（支持 `--outcome-file` 传长文本）
+5. **早期终止**：连续 3 个同因失败 → 停止，报告根因
+6. `--finalize` 汇总
 
 ## 步骤 5：生成报告
 
@@ -93,7 +98,7 @@ python3 {baseDir}/scripts/report_builder.py <cases_json> [--eval-md <skill_path>
 ## 已知限制
 
 - Agent 非确定性 → 使用 pass@3 | 子 Agent 知晓预期 → 测试失效
-- sessions_spawn 不支持 skills 参数 → 目标 Skill 须已在 available_skills 中配置
+- sessions_spawn 不支持 skills 参数 → 目标 Skill 必须已正确安装（步骤 2.5.1 检查）
 - 依赖未补齐时测试不可信 → 务必先完成步骤 2.5
 
 ## 参考文档（按需加载）

@@ -302,6 +302,43 @@ class TestTestCasesValidator(unittest.TestCase):
         self.assertIn('total', info)
         self.assertIn('by_dimension', info)
 
+    def test_dangerous_rm_rf_rejected(self):
+        from test_cases_validator import TestCasesValidator
+        p = self._payload(cases=[self._case(input='run rm -rf /tmp/*')])
+        ok, msg = TestCasesValidator.validate(p)
+        self.assertFalse(ok)
+        self.assertIn('危险命令', msg)
+
+    def test_dangerous_mkfs_rejected(self):
+        from test_cases_validator import TestCasesValidator
+        p = self._payload(cases=[self._case(input='please mkfs /dev/sda1')])
+        ok, msg = TestCasesValidator.validate(p)
+        self.assertFalse(ok)
+
+    def test_dangerous_dd_rejected(self):
+        from test_cases_validator import TestCasesValidator
+        p = self._payload(cases=[self._case(input='dd if=/dev/zero of=/dev/sda')])
+        ok, msg = TestCasesValidator.validate(p)
+        self.assertFalse(ok)
+
+    def test_dangerous_fork_bomb_rejected(self):
+        from test_cases_validator import TestCasesValidator
+        p = self._payload(cases=[self._case(input=':(){ :|:& };:')])
+        ok, msg = TestCasesValidator.validate(p)
+        self.assertFalse(ok)
+
+    def test_safe_echo_simulated_passes(self):
+        from test_cases_validator import TestCasesValidator
+        p = self._payload(cases=[self._case(input='check weather and echo SIMULATED_DANGEROUS_COMMAND')])
+        ok, msg = TestCasesValidator.validate(p)
+        self.assertTrue(ok, msg)
+
+    def test_safe_rm_without_rf_passes(self):
+        from test_cases_validator import TestCasesValidator
+        p = self._payload(cases=[self._case(input='remove the file please')])
+        ok, msg = TestCasesValidator.validate(p)
+        self.assertTrue(ok, msg)
+
 
 # ──────────────────────────────────────────────
 # ReportBuilder — 使用实际 API
@@ -1049,6 +1086,7 @@ class TestSkeletonGeneration(unittest.TestCase):
         skeleton = SmartTestGenerator(self.skill).generate_skeleton()
         exact = [c for c in skeleton['cases'] if c['type'] == 'exact_match']
         self.assertTrue(all(c.get('multi_trial') for c in exact))
+
 
 
 if __name__ == '__main__':

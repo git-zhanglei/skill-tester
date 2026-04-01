@@ -76,8 +76,8 @@ jobs:
         with:
           name: skill-tester-report
           path: |
-            test-report-*.md
-            report.json
+            $HOME/.openclaw/workspace/.skill-tester/reports/test-report-*.md
+            $HOME/.openclaw/workspace/.skill-tester/reports/*.json
 ```
 
 ## GitLab CI 示例
@@ -92,8 +92,8 @@ skill-certify:
     - python3 scripts/ci_gate.py report.json --min-overall 40
   artifacts:
     paths:
-      - test-report-*.md
-      - report.json
+      - $HOME/.openclaw/workspace/.skill-tester/reports/test-report-*.md
+      - $HOME/.openclaw/workspace/.skill-tester/reports/*.json
     when: always
   rules:
     - changes:

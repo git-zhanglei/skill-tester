@@ -49,6 +49,10 @@ python3 parallel_test_runner.py <cases_json> \
     --record <case_id> --status passed|failed|error \
     --outcome "输出摘要" --session-id "<id>" \
     --tokens-in <N> --tokens-out <N> [--trial 1]
+
+# 或从文件读取 outcome（适合长输出）
+python3 parallel_test_runner.py cases.json --record hit_exact_0 --status passed \
+    --outcome-file /tmp/outcome.txt --session-id "session-123"
 ```
 
 - `--tokens-in` / `--tokens-out`：从子 Agent completion event 的 stats 中提取

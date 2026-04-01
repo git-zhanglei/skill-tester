@@ -624,9 +624,12 @@ if __name__ == '__main__':
     builder = ReportBuilder(results)
     scores  = builder.compute_scores()
 
+    from constants import REPORTS_DIR, init_directories
+    init_directories()
+
     skill_name = results.get('skill_name', 'unknown')
     ts         = datetime.now().strftime('%Y%m%d_%H%M%S')
-    md_path    = Path(args.output) if args.output else Path(f'test-report-{skill_name}-{ts}.md')
+    md_path    = Path(args.output) if args.output else REPORTS_DIR / f'test-report-{skill_name}-{ts}.md'
 
     md_path.write_text(builder.build_markdown(), encoding='utf-8')
     print(f'✅ Markdown 报告已生成: {md_path}')

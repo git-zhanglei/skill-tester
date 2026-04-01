@@ -95,7 +95,7 @@
 
 **说明：** `report_builder.py` 将报告输出到当前工作目录，文件名格式为：
 ```
-test-report-<skill_name>-<timestamp>.md
+<workspace>/.skill-tester/reports/test-report-<skill_name>-<timestamp>.md
 ```
 
 **解决：** 在执行命令时指定输出路径：

@@ -13,6 +13,22 @@ class TestCasesValidator:
     REQUIRED_FIELDS = ['version', 'skill_name', 'total', 'cases', 'execution']
     CASE_REQUIRED_FIELDS = ['id', 'dimension', 'type', 'input', 'expected', 'description', 'weight', 'status']
     
+    # 测试案例中禁止出现的危险命令模式
+    DANGEROUS_PATTERNS = [
+        (r'\brm\s+-[^\s]*r[^\s]*f\b', 'rm -rf（递归强制删除）'),
+        (r'\brm\s+-[^\s]*f[^\s]*r\b', 'rm -fr（递归强制删除）'),
+        (r'\bmkfs\b', 'mkfs（格式化磁盘）'),
+        (r'\bdd\s+if=', 'dd if=（磁盘覆写）'),
+        (r':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;', 'fork bomb'),
+        (r'>\s*/dev/sd[a-z]', '> /dev/sdX（覆写磁盘）'),
+        (r'>\s*/dev/nvme', '> /dev/nvme（覆写磁盘）'),
+        (r'\bshutdown\b', 'shutdown（关机）'),
+        (r'\breboot\b', 'reboot（重启）'),
+        (r'\binit\s+0\b', 'init 0（关机）'),
+        (r'\bkillall\b', 'killall（杀掉所有进程）'),
+        (r'\bchmod\s+-R\s+777\s+/', 'chmod -R 777 /（全局权限修改）'),
+    ]
+    
     @staticmethod
     def validate(test_cases_data: Dict) -> Tuple[bool, str]:
         """
@@ -50,6 +66,8 @@ class TestCasesValidator:
     @staticmethod
     def _validate_case(case: Dict, index: int) -> Tuple[bool, str]:
         """验证单个测试案例"""
+        import re
+        
         for field in TestCasesValidator.CASE_REQUIRED_FIELDS:
             if field not in case:
                 return False, f"第 {index+1} 个测试案例缺少字段: {field}"
@@ -58,6 +76,16 @@ class TestCasesValidator:
         valid_statuses = ['pending', 'running', 'completed']
         if case['status'] not in valid_statuses:
             return False, f"第 {index+1} 个测试案例的 status 无效: {case['status']}"
+        
+        # 检查 input 中是否包含危险命令
+        input_text = case.get('input', '')
+        for pattern, desc in TestCasesValidator.DANGEROUS_PATTERNS:
+            if re.search(pattern, input_text):
+                return False, (
+                    f"第 {index+1} 个测试案例 [{case.get('id', '?')}] 的 input 包含危险命令: {desc}。"
+                    f"测试案例禁止包含真实破坏性命令——子 Agent 可能拥有高权限且不一定拒绝执行。"
+                    f"请用无害占位符替代（如 'echo SIMULATED_DANGEROUS_COMMAND'）"
+                )
         
         # 如果已完成，检查 result
         if case['status'] == 'completed':

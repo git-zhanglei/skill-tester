@@ -3,6 +3,7 @@
 Constants - 常量定义
 """
 
+import os
 from pathlib import Path
 
 # 版本
@@ -10,8 +11,10 @@ VERSION = "3.0.0"
 MIN_SUPPORTED_VERSION = "3.0"
 CURRENT_VERSION       = VERSION  # 别名，保持向后兼容
 
-# 输出目录（相对于当前工作目录，由 Agent 在运行时决定路径）
-OUTPUT_BASE_DIR = Path.home() / '.skill-tester'
+# 输出目录：遵循 OpenClaw workspace 约定
+# 优先使用 OPENCLAW_WORKSPACE 环境变量，否则默认 ~/.openclaw/workspace
+_workspace = Path(os.environ.get('OPENCLAW_WORKSPACE', str(Path.home() / '.openclaw' / 'workspace')))
+OUTPUT_BASE_DIR = _workspace / '.skill-tester'
 TEST_CASES_DIR = OUTPUT_BASE_DIR / 'test-cases'
 REPORTS_DIR    = OUTPUT_BASE_DIR / 'reports'
 RESULTS_DIR    = OUTPUT_BASE_DIR / 'results'

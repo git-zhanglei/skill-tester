@@ -2,8 +2,11 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
-~/.skill-tester/
 .pytest_cache/
+
+# 运行时产物（存放在 <workspace>/.skill-tester/ 中，不在 Skill 目录）
+test-report-*.md
+test-report-*.json
 
 # 非 Skill 运行时文件（打包时排除）
 tests/

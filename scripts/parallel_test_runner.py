@@ -366,7 +366,8 @@ def main() -> int:
 
     # --record 附属参数
     parser.add_argument('--status',  choices=['passed', 'failed', 'error'], help='案例结果状态')
-    parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（必填，建议包含原始输出摘要）')
+    parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（或用 --outcome-file）')
+    parser.add_argument('--outcome-file', type=str, help='从文件读取 outcome（替代 --outcome）')
     parser.add_argument('--trial',   type=int,   help='多试验序号（multi_trial 专用）')
     parser.add_argument('--session-id', default='', help='sessions_spawn 返回的会话 ID（必填）')
     parser.add_argument('--tokens-in',  type=int, default=0, help='本次执行消耗的输入 token 数')
@@ -393,16 +394,30 @@ def main() -> int:
         if not args.status:
             print('❌ --record 需要同时提供 --status', file=sys.stderr)
             return 1
-        if not args.outcome.strip():
-            print('❌ --record 必须提供非空 --outcome，禁止空结果写入', file=sys.stderr)
+
+        # outcome 可以从 --outcome 或 --outcome-file 获取
+        outcome = args.outcome
+        if args.outcome_file:
+            outcome_path = Path(args.outcome_file)
+            if outcome_path.exists():
+                outcome = outcome_path.read_text(encoding='utf-8').strip()
+            else:
+                print(f'❌ --outcome-file 文件不存在: {args.outcome_file}', file=sys.stderr)
+                return 1
+
+        if not outcome.strip():
+            print('❌ --record 必须提供非空 --outcome 或 --outcome-file', file=sys.stderr)
             return 1
-        if not args.session_id.strip():
-            print('❌ --record 必须提供 --session-id（来自 sessions_spawn 结果）', file=sys.stderr)
+
+        # session-id 在 error 状态时可选
+        if not args.session_id.strip() and args.status != 'error':
+            print('❌ --record 必须提供 --session-id（error 状态除外）', file=sys.stderr)
             return 1
+
         result = coord.record(
             case_id=args.record,
             status=args.status,
-            outcome=args.outcome,
+            outcome=outcome,
             trial=args.trial,
             session_id=args.session_id,
             tokens_in=args.tokens_in,
