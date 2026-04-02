@@ -681,7 +681,7 @@ def main() -> int:
     parser.add_argument('--status',  choices=['passed', 'failed', 'error'], help='案例结果状态')
     parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（或用 --outcome-file）')
     parser.add_argument('--outcome-file', type=str, help='从文件读取 outcome（替代 --outcome）')
-    parser.add_argument('--agent-output', default='', help='子 Agent 返回的完整消息文本（保存到 results 目录）')
+    parser.add_argument('--agent-output', default='', help='子 Agent 返回的完整消息文本（保存到 results 目录）。传 "-" 表示从 stdin 读取')
     parser.add_argument('--agent-output-file', type=str, help='从文件读取 agent-output（替代 --agent-output，读取后自动删除临时文件）')
     parser.add_argument('--trial',   type=int,   help='多试验序号（multi_trial 专用）')
     parser.add_argument('--session-id', default='', help='sessions_spawn 返回的会话 ID（必填）')
@@ -733,13 +733,12 @@ def main() -> int:
             print('❌ --record 必须提供 --session-id（error 状态除外）', file=sys.stderr)
             return 1
 
-        # agent_output 可以从 --agent-output 或 --agent-output-file 获取
+        # agent_output 来源优先级：--agent-output-file > --agent-output（含 stdin）
         agent_output = args.agent_output
         if args.agent_output_file:
             ao_path = Path(args.agent_output_file)
             if ao_path.exists():
                 agent_output = ao_path.read_text(encoding='utf-8').strip()
-                # 读取后删除临时文件
                 try:
                     ao_path.unlink()
                 except OSError:
@@ -747,6 +746,9 @@ def main() -> int:
             else:
                 print(f'❌ --agent-output-file 文件不存在: {args.agent_output_file}', file=sys.stderr)
                 return 1
+        elif agent_output == '-':
+            # 从 stdin 读取（支持 heredoc / pipe）
+            agent_output = sys.stdin.read().strip()
 
         result = coord.record(
             case_id=args.record,

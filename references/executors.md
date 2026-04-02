@@ -37,7 +37,7 @@ python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension
 
 1. **提取原始输出**：从 `<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>` 到 `<<<END_UNTRUSTED_CHILD_RESULT>>>` 之间的完整文本，不做任何修改、总结或缩写
 2. **独立评估**：主 Agent 根据 `evaluation_hint` 和 `expected` 判断 passed/failed
-3. **记录结果**：调用 `--record`，`--outcome` 写一句话评估摘要，`--agent-output` 传入完整原文
+3. **记录结果**：调用 `--record`，`--outcome` 写一句话评估摘要，`--agent-output -` 通过 stdin 传入完整原文
 
 ### 3. 记录结果（含 Token 采集 + 原始输出存证）
 
@@ -59,20 +59,23 @@ python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension
 
 #### 传参方式
 
-直接用 `--agent-output` 传原文。Agent 通过 `exec` 工具调用脚本，shell 转义由工具处理，无需担心特殊字符。
+用 `--agent-output -` 从 stdin 读取原文（推荐，通过 heredoc 传入，避免 shell 转义问题）：
 
 ```bash
 python3 parallel_test_runner.py <cases_json> \
     --record <case_id> --status passed|failed|error \
     --outcome "主 Agent 的一句话评估摘要" \
-    --agent-output "子 Agent 的完整原始输出（原文粘贴，不做任何修改）" \
+    --agent-output - \
     --session-id "<id>" \
-    --tokens-in <N> --tokens-out <N> [--trial 1]
+    --tokens-in <N> --tokens-out <N> [--trial 1] << 'AGENT_OUTPUT'
+子 Agent 的完整原始输出（原文粘贴，不做任何修改）
+AGENT_OUTPUT
 ```
 
+- `--agent-output -`：从 stdin 读取子 Agent 完整原始输出（heredoc / pipe 均可）
+- `--agent-output "文本"`：直接传入（仅适用于无特殊字符的短输出）
+- `--agent-output-file <path>`：从文件读取（读取后自动删除文件）
 - `--outcome`：主 Agent 对结果的评估摘要（如 "成功返回20个商品列表"）
-- `--agent-output`：子 Agent 完整原始输出原文
-- `--agent-output-file`：备用，从文件读取原始输出（读取后自动删除文件）
 - `--tokens-in` / `--tokens-out`：从子 Agent completion event 的 stats 中提取
 - `--trial`：multi_trial 案例专用（从 1 开始），所有 trial 完成后自动聚合
 
