@@ -85,9 +85,10 @@ class TestCoordinator:
         # 或使用 execution.started_at
         batch_id = self.data.get('execution', {}).get('batch_id', '')
         if not batch_id:
-            # 从文件名提取日期部分，加上当前时分秒
+            # 生成 batch_id：{skill_name}-{timestamp}，清理非法文件名字符
             now = datetime.now()
-            batch_id = f'{skill_name}-{now.strftime("%Y%m%d_%H%M%S")}'
+            safe_name = re.sub(r'[^\w\-.]', '_', skill_name)
+            batch_id = f'{safe_name}-{now.strftime("%Y%m%d_%H%M%S")}'
             self.data.setdefault('execution', {})['batch_id'] = batch_id
             self._save()
 
@@ -364,6 +365,11 @@ class TestCoordinator:
             'avg_tokens_per_case': avg_tokens_per_case,
             'finalized_at':    datetime.now().isoformat(),
         }
+
+        # batch_id（指向 results 目录）
+        batch_id = self.data.get('execution', {}).get('batch_id', '')
+        if batch_id:
+            summary['results_dir'] = str(RESULTS_DIR / batch_id)
 
         # phases 状态
         if phases:
