@@ -17,6 +17,7 @@ _workspace = Path(os.environ.get('OPENCLAW_WORKSPACE', str(Path.home() / '.openc
 OUTPUT_BASE_DIR = _workspace / '.skill-tester'
 TEST_CASES_DIR = OUTPUT_BASE_DIR / 'test-cases'
 REPORTS_DIR    = OUTPUT_BASE_DIR / 'reports'
+RESULTS_DIR    = OUTPUT_BASE_DIR / 'results'
 
 # 测试状态
 class TestStatus:
@@ -93,3 +94,4 @@ def init_directories():
     """初始化所有输出目录（延迟调用，避免导入时副作用）"""
     TEST_CASES_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)

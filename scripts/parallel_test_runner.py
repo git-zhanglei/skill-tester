@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from constants import DEFAULT_TIMEOUT, TestStatus, EARLY_EXIT_THRESHOLD, EARLY_EXIT_REASONS
+from constants import DEFAULT_TIMEOUT, TestStatus, EARLY_EXIT_THRESHOLD, EARLY_EXIT_REASONS, RESULTS_DIR
 
 
 # ─────────────────────────────────────────────────────────
@@ -73,6 +73,56 @@ class TestCoordinator:
         if not self.cases_file.exists():
             raise FileNotFoundError(f'测试案例文件不存在: {cases_file}')
         self.data: Dict[str, Any] = json.loads(self.cases_file.read_text(encoding='utf-8'))
+        self._batch_dir: Optional[Path] = None
+
+    def _get_batch_dir(self) -> Path:
+        """获取当前测试批次的 results 子目录，按 {skill_name}-{timestamp} 命名。"""
+        if self._batch_dir and self._batch_dir.exists():
+            return self._batch_dir
+
+        skill_name = self.data.get('skill_name', 'unknown')
+        # 从 cases 文件名提取时间戳（如 test-cases-xxx-20260402.json → 20260402）
+        # 或使用 execution.started_at
+        batch_id = self.data.get('execution', {}).get('batch_id', '')
+        if not batch_id:
+            # 从文件名提取日期部分，加上当前时分秒
+            now = datetime.now()
+            batch_id = f'{skill_name}-{now.strftime("%Y%m%d_%H%M%S")}'
+            self.data.setdefault('execution', {})['batch_id'] = batch_id
+            self._save()
+
+        batch_dir = RESULTS_DIR / batch_id
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        self._batch_dir = batch_dir
+        return batch_dir
+
+    def _save_agent_output(self, case_id: str, agent_output: str,
+                           session_id: str = '', trial: Optional[int] = None,
+                           tokens_in: int = 0, tokens_out: int = 0) -> Optional[str]:
+        """将子 Agent 的完整输出保存到 results 批次目录下的独立 JSON 文件。"""
+        if not agent_output:
+            return None
+
+        batch_dir = self._get_batch_dir()
+        filename = f'{case_id}_trial{trial}.json' if trial is not None else f'{case_id}.json'
+        filepath = batch_dir / filename
+
+        result_data = {
+            'case_id': case_id,
+            'session_id': session_id,
+            'tokens_in': tokens_in,
+            'tokens_out': tokens_out,
+            'agent_output': agent_output,
+            'recorded_at': datetime.now().isoformat(),
+        }
+        if trial is not None:
+            result_data['trial'] = trial
+
+        filepath.write_text(
+            json.dumps(result_data, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+        return str(filepath)
 
     # ─────────────────────────────────────────────
     # 步骤 A：生成执行计划
@@ -189,7 +239,7 @@ class TestCoordinator:
             session_id:   sessions_spawn 返回的会话 ID
             tokens_in:    本次执行消耗的输入 token 数
             tokens_out:   本次执行消耗的输出 token 数
-            agent_output: 子 Agent 返回的完整消息文本（用于人肉回溯）
+            agent_output: 子 Agent 返回的完整消息文本（保存到 results 目录）
 
         Returns:
             dict: {"recorded": True/False, "case_id": ..., "status": ..., ...}
@@ -199,6 +249,13 @@ class TestCoordinator:
                 continue
 
             now = datetime.now().isoformat()
+
+            # 保存子 Agent 完整输出到独立文件
+            output_path = self._save_agent_output(
+                case_id=case_id, agent_output=agent_output,
+                session_id=session_id, trial=trial,
+                tokens_in=tokens_in, tokens_out=tokens_out,
+            )
 
             if trial is not None:
                 # ── Multi-trial：累积 trials 列表 ──
@@ -213,8 +270,6 @@ class TestCoordinator:
                     'tokens_out': tokens_out,
                     'recorded_at': now,
                 }
-                if agent_output:
-                    trial_entry['agent_output'] = agent_output
                 case['trials'].append(trial_entry)
                 expected_trials = case.get('trial_count', 3)
                 if len(case['trials']) >= expected_trials:
@@ -239,16 +294,13 @@ class TestCoordinator:
                 # ── Single-trial ──
                 case['status']       = TestStatus.COMPLETED
                 case['completed_at'] = now
-                result_entry = {
+                case['result'] = {
                     'status': status,
                     'outcome': outcome,
                     'session_id': session_id,
                     'tokens_in': tokens_in,
                     'tokens_out': tokens_out,
                 }
-                if agent_output:
-                    result_entry['agent_output'] = agent_output
-                case['result'] = result_entry
 
             self._save()
 
@@ -623,8 +675,8 @@ def main() -> int:
     parser.add_argument('--status',  choices=['passed', 'failed', 'error'], help='案例结果状态')
     parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（或用 --outcome-file）')
     parser.add_argument('--outcome-file', type=str, help='从文件读取 outcome（替代 --outcome）')
-    parser.add_argument('--agent-output', default='', help='子 Agent 返回的完整消息文本')
-    parser.add_argument('--agent-output-file', type=str, help='从文件读取 agent-output（替代 --agent-output）')
+    parser.add_argument('--agent-output', default='', help='子 Agent 返回的完整消息文本（保存到 results 目录）')
+    parser.add_argument('--agent-output-file', type=str, help='从文件读取 agent-output（替代 --agent-output，读取后自动删除临时文件）')
     parser.add_argument('--trial',   type=int,   help='多试验序号（multi_trial 专用）')
     parser.add_argument('--session-id', default='', help='sessions_spawn 返回的会话 ID（必填）')
     parser.add_argument('--tokens-in',  type=int, default=0, help='本次执行消耗的输入 token 数')
@@ -681,6 +733,11 @@ def main() -> int:
             ao_path = Path(args.agent_output_file)
             if ao_path.exists():
                 agent_output = ao_path.read_text(encoding='utf-8').strip()
+                # 读取后删除临时文件
+                try:
+                    ao_path.unlink()
+                except OSError:
+                    pass
             else:
                 print(f'❌ --agent-output-file 文件不存在: {args.agent_output_file}', file=sys.stderr)
                 return 1
