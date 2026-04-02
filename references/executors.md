@@ -27,37 +27,95 @@ python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension
 - 输出纯净 `task_description`：只有用户请求，无测试意图
 - 每个 task 包含 `evaluation_hint`，告知主 Agent 如何评判
 
-### 2. Agent 串行执行
+### 2. Agent 执行
 
-对每个 task，Agent 调用 `sessions_spawn`：
+对每个 task，Agent 调用 `sessions_spawn`，等待子 Agent completion event 返回。
 
-```python
-result = sessions_spawn(
-    task    = task["task_description"],
-    timeout = 120  # 默认超时 120 秒
-)
-sub_output = result.get("output") or str(result)
-sub_session_id = result.get("session_id") or result.get("id") or ""
+**执行真实性门控**：必须拿到子 Agent 的完整输出和 session_id 后才可记录。
+
+**收到 completion event 后，Agent 必须：**
+
+1. **提取原始输出**：从 `<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>` 到 `<<<END_UNTRUSTED_CHILD_RESULT>>>` 之间的完整文本
+2. **保存原始输出到临时文件**：`write /tmp/agent_output_{case_id}.txt`，内容为上述原文，不做任何修改、总结或缩写
+3. **独立评估**：主 Agent 根据 `evaluation_hint` 和 `expected` 判断 passed/failed
+4. **记录结果**：调用 `--record`，`--outcome` 写一句话评估摘要，`--agent-output-file` 指向临时文件
+
+### 3. 记录结果（含 Token 采集 + 原始输出存证）
+
+每条案例记录需要两类内容：
+
+| 参数 | 内容 | 存储位置 |
+|------|------|---------|
+| `--outcome` | 主 Agent 的**一句话评估摘要** | test-cases JSON 的 `result.outcome` |
+| `--agent-output` / `--agent-output-file` | 子 Agent 返回给用户的**完整原始输出** | `results/{batch_id}/{case_id}.json` |
+
+#### ⚠️ `--agent-output` 必须是原始输出（强制）
+
+`--agent-output` 的内容**必须是子 Agent 返回的完整原文**——即用户实际会看到的消息内容。
+
+- ✅ **正确**：子 Agent completion event 中 `<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>` 到 `<<<END_UNTRUSTED_CHILD_RESULT>>>` 之间的全部文本，原样保存，不做任何修改
+- ❌ **错误**：主 Agent 自己写的摘要、总结、缩写、提炼
+
+**为什么？** 这是测试存证，用于人工回溯评估。如果保存的是摘要而不是原文，就失去了存证价值——无法判断子 Agent 的实际表现。
+
+#### 推荐做法：写入临时文件后传路径
+
+子 Agent 的输出通常较长且含特殊字符，直接通过命令行 `--agent-output "..."` 传参容易出问题。推荐：
+
+```bash
+# 1. 主 Agent 将子 Agent 原始输出写入临时文件
+write /tmp/agent_output_{case_id}.txt  ← 子 Agent 完整原文
+
+# 2. 通过 --agent-output-file 传入（脚本读取后自动删除临时文件）
+python3 parallel_test_runner.py <cases_json> \
+    --record <case_id> --status passed \
+    --outcome "一句话评估摘要" \
+    --agent-output-file /tmp/agent_output_{case_id}.txt \
+    --session-id "<id>" \
+    --tokens-in <N> --tokens-out <N>
 ```
 
-**执行真实性门控**：必须拿到 `sub_output` 和 `sub_session_id` 后才可记录。
-
-### 3. 记录结果（含 Token 采集）
+#### 完整命令参考
 
 ```bash
 python3 parallel_test_runner.py <cases_json> \
     --record <case_id> --status passed|failed|error \
-    --outcome "输出摘要" --session-id "<id>" \
+    --outcome "主 Agent 的一句话评估摘要" \
+    --agent-output-file /tmp/agent_output.txt \
+    --session-id "<id>" \
     --tokens-in <N> --tokens-out <N> [--trial 1]
-
-# 或从文件读取 outcome（适合长输出）
-python3 parallel_test_runner.py cases.json --record hit_exact_0 --status passed \
-    --outcome-file /tmp/outcome.txt --session-id "session-123"
 ```
 
+- `--outcome`：主 Agent 对结果的评估摘要（如 "成功返回20个商品列表"）
+- `--agent-output-file`：子 Agent 完整原始输出的临时文件路径（读取后自动删除）
+- `--agent-output`：直接传入原始输出文本（仅适用于短输出）
 - `--tokens-in` / `--tokens-out`：从子 Agent completion event 的 stats 中提取
-- Token 数据保存到每条 case 的 result 中，finalize 时汇总统计
 - `--trial`：multi_trial 案例专用（从 1 开始），所有 trial 完成后自动聚合
+
+#### 存证文件结构
+
+原始输出保存在 `results/` 目录下，按测试批次分子目录：
+
+```
+.skill-tester/results/
+  {skill_name}-{YYYYMMDD_HHMMSS}/     ← 批次目录（自动创建）
+    hit_exact_0.json                    ← 单次试验
+    exec_normal_0_trial1.json           ← multi-trial 第1次
+    exec_normal_0_trial2.json           ← multi-trial 第2次
+    ...
+```
+
+每个文件内容：
+```json
+{
+  "case_id": "hit_exact_0",
+  "session_id": "子 Agent 会话 ID",
+  "tokens_in": 74000,
+  "tokens_out": 3300,
+  "agent_output": "子 Agent 返回的完整原始输出...",
+  "recorded_at": "2026-04-02T12:01:23.456789"
+}
+```
 
 ### 4. 早期终止
 
