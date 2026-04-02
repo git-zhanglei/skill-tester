@@ -176,17 +176,20 @@ class TestCoordinator:
 
     def record(self, case_id: str, status: str, outcome: str = '',
                trial: Optional[int] = None, session_id: str = '',
-               tokens_in: int = 0, tokens_out: int = 0) -> Dict[str, Any]:
+               tokens_in: int = 0, tokens_out: int = 0,
+               agent_output: str = '') -> Dict[str, Any]:
         """
         记录 Agent 对一个案例的评估结果。
 
         Args:
-            case_id:    案例 ID
-            status:     'passed' | 'failed' | 'error'
-            outcome:    子 Agent 实际输出摘要（可选）
-            trial:      多试验序号（multi_trial 案例专用，从 1 开始）
-            tokens_in:  本次执行消耗的输入 token 数
-            tokens_out: 本次执行消耗的输出 token 数
+            case_id:      案例 ID
+            status:       'passed' | 'failed' | 'error'
+            outcome:      主 Agent 的评估摘要（一句话总结）
+            trial:        多试验序号（multi_trial 案例专用，从 1 开始）
+            session_id:   sessions_spawn 返回的会话 ID
+            tokens_in:    本次执行消耗的输入 token 数
+            tokens_out:   本次执行消耗的输出 token 数
+            agent_output: 子 Agent 返回的完整消息文本（用于人肉回溯）
 
         Returns:
             dict: {"recorded": True/False, "case_id": ..., "status": ..., ...}
@@ -201,7 +204,7 @@ class TestCoordinator:
                 # ── Multi-trial：累积 trials 列表 ──
                 if 'trials' not in case:
                     case['trials'] = []
-                case['trials'].append({
+                trial_entry = {
                     'trial':   trial,
                     'status':  status,
                     'outcome': outcome,
@@ -209,7 +212,10 @@ class TestCoordinator:
                     'tokens_in': tokens_in,
                     'tokens_out': tokens_out,
                     'recorded_at': now,
-                })
+                }
+                if agent_output:
+                    trial_entry['agent_output'] = agent_output
+                case['trials'].append(trial_entry)
                 expected_trials = case.get('trial_count', 3)
                 if len(case['trials']) >= expected_trials:
                     all_statuses = [t['status'] for t in case['trials']]
@@ -233,13 +239,16 @@ class TestCoordinator:
                 # ── Single-trial ──
                 case['status']       = TestStatus.COMPLETED
                 case['completed_at'] = now
-                case['result']       = {
+                result_entry = {
                     'status': status,
                     'outcome': outcome,
                     'session_id': session_id,
                     'tokens_in': tokens_in,
                     'tokens_out': tokens_out,
                 }
+                if agent_output:
+                    result_entry['agent_output'] = agent_output
+                case['result'] = result_entry
 
             self._save()
 
@@ -614,6 +623,8 @@ def main() -> int:
     parser.add_argument('--status',  choices=['passed', 'failed', 'error'], help='案例结果状态')
     parser.add_argument('--outcome', default='', help='子 Agent 输出摘要（或用 --outcome-file）')
     parser.add_argument('--outcome-file', type=str, help='从文件读取 outcome（替代 --outcome）')
+    parser.add_argument('--agent-output', default='', help='子 Agent 返回的完整消息文本')
+    parser.add_argument('--agent-output-file', type=str, help='从文件读取 agent-output（替代 --agent-output）')
     parser.add_argument('--trial',   type=int,   help='多试验序号（multi_trial 专用）')
     parser.add_argument('--session-id', default='', help='sessions_spawn 返回的会话 ID（必填）')
     parser.add_argument('--tokens-in',  type=int, default=0, help='本次执行消耗的输入 token 数')
@@ -664,6 +675,16 @@ def main() -> int:
             print('❌ --record 必须提供 --session-id（error 状态除外）', file=sys.stderr)
             return 1
 
+        # agent_output 可以从 --agent-output 或 --agent-output-file 获取
+        agent_output = args.agent_output
+        if args.agent_output_file:
+            ao_path = Path(args.agent_output_file)
+            if ao_path.exists():
+                agent_output = ao_path.read_text(encoding='utf-8').strip()
+            else:
+                print(f'❌ --agent-output-file 文件不存在: {args.agent_output_file}', file=sys.stderr)
+                return 1
+
         result = coord.record(
             case_id=args.record,
             status=args.status,
@@ -672,6 +693,7 @@ def main() -> int:
             session_id=args.session_id,
             tokens_in=args.tokens_in,
             tokens_out=args.tokens_out,
+            agent_output=agent_output,
         )
         print(json.dumps(result, ensure_ascii=False))
         if not result.get('recorded'):
