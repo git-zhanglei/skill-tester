@@ -35,10 +35,9 @@ python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension
 
 **收到 completion event 后，Agent 必须：**
 
-1. **提取原始输出**：从 `<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>` 到 `<<<END_UNTRUSTED_CHILD_RESULT>>>` 之间的完整文本
-2. **保存原始输出到临时文件**：`write /tmp/agent_output_{case_id}.txt`，内容为上述原文，不做任何修改、总结或缩写
-3. **独立评估**：主 Agent 根据 `evaluation_hint` 和 `expected` 判断 passed/failed
-4. **记录结果**：调用 `--record`，`--outcome` 写一句话评估摘要，`--agent-output-file` 指向临时文件
+1. **提取原始输出**：从 `<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>` 到 `<<<END_UNTRUSTED_CHILD_RESULT>>>` 之间的完整文本，不做任何修改、总结或缩写
+2. **独立评估**：主 Agent 根据 `evaluation_hint` 和 `expected` 判断 passed/failed
+3. **记录结果**：调用 `--record`，`--outcome` 写一句话评估摘要，`--agent-output` 传入完整原文
 
 ### 3. 记录结果（含 Token 采集 + 原始输出存证）
 
@@ -58,37 +57,22 @@ python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension
 
 **为什么？** 这是测试存证，用于人工回溯评估。如果保存的是摘要而不是原文，就失去了存证价值——无法判断子 Agent 的实际表现。
 
-#### 推荐做法：写入临时文件后传路径
+#### 传参方式
 
-子 Agent 的输出通常较长且含特殊字符，直接通过命令行 `--agent-output "..."` 传参容易出问题。推荐：
-
-```bash
-# 1. 主 Agent 将子 Agent 原始输出写入临时文件
-write /tmp/agent_output_{case_id}.txt  ← 子 Agent 完整原文
-
-# 2. 通过 --agent-output-file 传入（脚本读取后自动删除临时文件）
-python3 parallel_test_runner.py <cases_json> \
-    --record <case_id> --status passed \
-    --outcome "一句话评估摘要" \
-    --agent-output-file /tmp/agent_output_{case_id}.txt \
-    --session-id "<id>" \
-    --tokens-in <N> --tokens-out <N>
-```
-
-#### 完整命令参考
+直接用 `--agent-output` 传原文。Agent 通过 `exec` 工具调用脚本，shell 转义由工具处理，无需担心特殊字符。
 
 ```bash
 python3 parallel_test_runner.py <cases_json> \
     --record <case_id> --status passed|failed|error \
     --outcome "主 Agent 的一句话评估摘要" \
-    --agent-output-file /tmp/agent_output.txt \
+    --agent-output "子 Agent 的完整原始输出（原文粘贴，不做任何修改）" \
     --session-id "<id>" \
     --tokens-in <N> --tokens-out <N> [--trial 1]
 ```
 
 - `--outcome`：主 Agent 对结果的评估摘要（如 "成功返回20个商品列表"）
-- `--agent-output-file`：子 Agent 完整原始输出的临时文件路径（读取后自动删除）
-- `--agent-output`：直接传入原始输出文本（仅适用于短输出）
+- `--agent-output`：子 Agent 完整原始输出原文
+- `--agent-output-file`：备用，从文件读取原始输出（读取后自动删除文件）
 - `--tokens-in` / `--tokens-out`：从子 Agent completion event 的 stats 中提取
 - `--trial`：multi_trial 案例专用（从 1 开始），所有 trial 完成后自动聚合
 
