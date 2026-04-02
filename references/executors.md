@@ -96,6 +96,8 @@ AGENT_OUTPUT
 ```json
 {
   "case_id": "hit_exact_0",
+  "input": "帮我在1688搜一下瑜伽裤，50元以内",
+  "outcome": "主 Agent 的一句话评估摘要",
   "session_id": "子 Agent 会话 ID",
   "tokens_in": 74000,
   "tokens_out": 3300,

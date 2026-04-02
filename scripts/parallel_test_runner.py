@@ -99,7 +99,8 @@ class TestCoordinator:
 
     def _save_agent_output(self, case_id: str, agent_output: str,
                            session_id: str = '', trial: Optional[int] = None,
-                           tokens_in: int = 0, tokens_out: int = 0) -> Optional[str]:
+                           tokens_in: int = 0, tokens_out: int = 0,
+                           input_text: str = '', outcome: str = '') -> Optional[str]:
         """将子 Agent 的完整输出保存到 results 批次目录下的独立 JSON 文件。"""
         if not agent_output:
             return None
@@ -110,6 +111,8 @@ class TestCoordinator:
 
         result_data = {
             'case_id': case_id,
+            'input': input_text,
+            'outcome': outcome,
             'session_id': session_id,
             'tokens_in': tokens_in,
             'tokens_out': tokens_out,
@@ -256,6 +259,7 @@ class TestCoordinator:
                 case_id=case_id, agent_output=agent_output,
                 session_id=session_id, trial=trial,
                 tokens_in=tokens_in, tokens_out=tokens_out,
+                input_text=case.get('input', ''), outcome=outcome,
             )
 
             if trial is not None:
