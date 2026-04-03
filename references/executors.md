@@ -9,6 +9,7 @@ skill-tester 使用 `parallel_test_runner.py`（TestCoordinator）配合 OpenCla
 ```
 TestCoordinator (parallel_test_runner.py)
 ├── prepare()          # 生成执行计划（纯净任务描述）
+├── record_baseline()  # 记录环境基线 Token（可选）
 ├── record()           # 记录单条案例结果（含 token 数据）
 ├── finalize()         # 汇总统计 + 早期终止检测
 └── JSON 持久化        # 每次 record 自动保存
@@ -26,6 +27,22 @@ python3 parallel_test_runner.py <cases_json> --prepare [--trials 3] [--dimension
 - `--dimension` 切片：只返回指定维度的 pending 案例
 - 输出纯净 `task_description`：只有用户请求，无测试意图
 - 每个 task 包含 `evaluation_hint`，告知主 Agent 如何评判
+
+### 1.5 基线测量（可选）
+
+在执行第一个案例前，Agent 可先测量环境固定 Token 开销，用于在报告中隔离 Skill 自身的增量成本。
+
+```bash
+# 1. Agent 通过 sessions_spawn 发送一条不触发任何 Skill 的空请求（如"你好"）
+# 2. 从 completion event 的 stats 中提取 tokens_in
+# 3. 记录基线
+python3 parallel_test_runner.py <cases_json> --record-baseline \
+    --tokens-in <N> --session-id "<id>"
+```
+
+基线包含 soul.md、Agent.md、已安装 Skill 列表等固定上下文的 Token 开销。记录后，`report_builder.py` 生成报告时会自动计算 Skill 增量成本（总消耗减去基线 × 会话次数）。
+
+未记录基线时，报告回退为原始 Token 总量展示，不影响其他功能。
 
 ### 2. Agent 执行
 

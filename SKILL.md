@@ -84,6 +84,8 @@ python3 {baseDir}/scripts/spec_checker.py <skill_path> --json
 
 ## 步骤 4：执行测试案例
 
+**基线测量（可选）**：执行第一个案例前，Agent 可通过 `sessions_spawn` 发送一条不触发任何 Skill 的空请求（如"你好"），将其 `tokens_in` 记录为环境基线：`python3 {baseDir}/scripts/parallel_test_runner.py <cases_json> --record-baseline --tokens-in <N> --session-id "<id>"`。报告将据此计算 Skill 增量成本，排除 soul.md、Agent.md、已安装 Skill 列表等环境固定开销。详见 [executors.md](./references/executors.md)。
+
 执行流程由案例 JSON 中的 `phases` 状态机驱动（Phase A → B → C），支持断点续跑。
 
 - **sandbox_compatible** 的 Skill：只有 Phase A，直接执行所有案例

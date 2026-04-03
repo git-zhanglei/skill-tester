@@ -51,6 +51,7 @@ class ReportBuilder:
         self.spec_score = float(results.get('spec_score', 0.0))
         self.cases      = results.get('cases', [])
         self.execution  = results.get('execution', {})
+        self.baseline   = results.get('baseline', {})
         self._scores: Optional[Dict[str, float]] = None
 
     # ──────────────────────────────────────────────
@@ -149,6 +150,30 @@ class ReportBuilder:
     def _count_skipped(self) -> int:
         """统计被跳过的案例数"""
         return sum(1 for c in self.cases if self._is_skipped(c))
+
+    @staticmethod
+    def _count_sessions(token_cases: List[Dict]) -> int:
+        """统计 sessions_spawn 调用总次数（multi-trial 每个 trial 算一次）"""
+        count = 0
+        for c in token_cases:
+            if c.get('multi_trial') and c.get('trials'):
+                count += len(c['trials'])
+            else:
+                count += 1
+        return count
+
+    @staticmethod
+    def _max_case_skill_delta(token_cases: List[Dict], baseline_in: int) -> int:
+        """计算单案例最大 Skill 增量 Token（扣除该案例的环境基线）"""
+        max_delta = 0
+        for c in token_cases:
+            r = c.get('result') or {}
+            c_in = r.get('tokens_in', 0)
+            c_out = r.get('tokens_out', 0)
+            c_sessions = len(c['trials']) if (c.get('multi_trial') and c.get('trials')) else 1
+            delta = max(0, c_in - baseline_in * c_sessions) + c_out
+            max_delta = max(max_delta, delta)
+        return max_delta
 
     def _cases_by(self, dimension: str, type_: Optional[str] = None) -> List[Dict]:
         return [
@@ -430,19 +455,40 @@ class ReportBuilder:
         total_tokens_out = sum((c['result'] or {}).get('tokens_out', 0) for c in token_cases)
         total_tokens = total_tokens_in + total_tokens_out
         if total_tokens > 0:
-            avg_tokens = round(total_tokens / len(token_cases)) if token_cases else 0
-            max_tokens = max(
-                ((c['result'] or {}).get('tokens_in', 0) + (c['result'] or {}).get('tokens_out', 0))
-                for c in token_cases
-            ) if token_cases else 0
-            lines += [
-                '### 执行成本',
-                '',
-                f'- 总 Token 消耗：{total_tokens:,}（输入 {total_tokens_in:,} + 输出 {total_tokens_out:,}）',
-                f'- 平均每案例：{avg_tokens:,} tokens',
-                f'- 最高单案例：{max_tokens:,} tokens',
-                '',
-            ]
+            baseline_in = self.baseline.get('tokens_in', 0)
+
+            if baseline_in > 0:
+                session_count = self._count_sessions(token_cases)
+                env_overhead_total = baseline_in * session_count
+                skill_delta_in = max(0, total_tokens_in - env_overhead_total)
+                skill_delta_total = skill_delta_in + total_tokens_out
+                avg_skill = round(skill_delta_total / len(token_cases)) if token_cases else 0
+                max_skill = self._max_case_skill_delta(token_cases, baseline_in)
+                lines += [
+                    '### 执行成本',
+                    '',
+                    f'- 环境基线：{baseline_in:,} tokens/session（soul.md + Agent.md + 已安装 Skill）',
+                    f'- Skill 增量成本：',
+                    f'  - 总增量：{skill_delta_total:,} tokens（输入 {skill_delta_in:,} + 输出 {total_tokens_out:,}）',
+                    f'  - 平均每案例增量：{avg_skill:,} tokens',
+                    f'  - 最高单案例增量：{max_skill:,} tokens',
+                    f'- 原始总消耗：{total_tokens:,} tokens（含 {session_count} × 环境基线）',
+                    '',
+                ]
+            else:
+                avg_tokens = round(total_tokens / len(token_cases)) if token_cases else 0
+                max_tokens = max(
+                    ((c['result'] or {}).get('tokens_in', 0) + (c['result'] or {}).get('tokens_out', 0))
+                    for c in token_cases
+                ) if token_cases else 0
+                lines += [
+                    '### 执行成本',
+                    '',
+                    f'- 总 Token 消耗：{total_tokens:,}（输入 {total_tokens_in:,} + 输出 {total_tokens_out:,}）',
+                    f'- 平均每案例：{avg_tokens:,} tokens',
+                    f'- 最高单案例：{max_tokens:,} tokens',
+                    '',
+                ]
 
         # 安全详情
         lines += ['## 安全检查', '']
@@ -669,7 +715,7 @@ class ReportBuilder:
     def build_json(self) -> Dict[str, Any]:
         scores = self.compute_scores()
         rel    = self.compute_reliability()
-        return {
+        result = {
             'version':    '3.0',
             'skill_name': self.skill_name,
             'generated_at': datetime.now().isoformat(),
@@ -687,6 +733,9 @@ class ReportBuilder:
             'test_summary': self.execution,
             'recommendations': self.get_recommendations(),
         }
+        if self.baseline.get('tokens_in', 0) > 0:
+            result['baseline'] = self.baseline
+        return result
 
 
 # ──────────────────────────────────────────────

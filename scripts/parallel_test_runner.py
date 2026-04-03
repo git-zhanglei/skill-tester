@@ -401,6 +401,28 @@ class TestCoordinator:
         return summary
 
     # ─────────────────────────────────────────────
+    # 基线测量：记录环境固定 Token 开销
+    # ─────────────────────────────────────────────
+
+    def record_baseline(self, tokens_in: int, tokens_out: int = 0,
+                        session_id: str = '') -> Dict[str, Any]:
+        """
+        记录环境基线 Token 消耗。
+
+        Agent 在正式测试前发送一条不触发任何 Skill 的空请求（如"你好"），
+        将其 tokens_in 作为环境固定开销（soul.md + Agent.md + 已安装 Skill 列表）。
+        报告生成时据此计算 Skill 增量成本。
+        """
+        self.data['baseline'] = {
+            'tokens_in': tokens_in,
+            'tokens_out': tokens_out,
+            'session_id': session_id,
+            'recorded_at': datetime.now().isoformat(),
+        }
+        self._save()
+        return {'recorded': True, 'baseline_tokens_in': tokens_in}
+
+    # ─────────────────────────────────────────────
     # 分阶段执行：推进 & 依赖验证
     # ─────────────────────────────────────────────
 
@@ -676,6 +698,8 @@ def main() -> int:
     group.add_argument('--prepare',  action='store_true', help='生成执行计划')
     group.add_argument('--record',   metavar='CASE_ID',   help='记录单个案例结果')
     group.add_argument('--finalize', action='store_true', help='生成执行摘要')
+    group.add_argument('--record-baseline', action='store_true',
+                       help='记录环境基线 Token（空请求），用于隔离 Skill 增量成本')
     group.add_argument('--advance-phase', action='store_true', help='推进到下一阶段')
     group.add_argument('--verify-dep', metavar='DEP_ID', help='验证单个依赖项')
     group.add_argument('--verify-all-deps', action='store_true', help='验证所有未验证的依赖')
@@ -771,6 +795,16 @@ def main() -> int:
     elif args.finalize:
         summary = coord.finalize()
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+    elif args.record_baseline:
+        if args.tokens_in <= 0:
+            print('⚠️ --record-baseline 的 --tokens-in 为 0，基线测量可能无效', file=sys.stderr)
+        result = coord.record_baseline(
+            tokens_in=args.tokens_in,
+            tokens_out=args.tokens_out,
+            session_id=args.session_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
     elif args.advance_phase:
         result = coord.advance_phase()
